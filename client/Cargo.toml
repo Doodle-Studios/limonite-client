@@ -1,0 +1,15 @@
+[package]
+name = "limonite-client"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+# No `java-listener` feature: the host binary can never bind a Java socket.
+pumpkin-core = { path = "../pumpkin/crates/pumpkin-core" }
+# For the Bedrock version constants.
+pumpkin-world = { path = "../pumpkin/crates/pumpkin-world" }
+
+tracing.workspace = true
+tracing-subscriber.workspace = true
