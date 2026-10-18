@@ -1,6 +1,66 @@
-[package]
-name = "limonite-client"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "3"
+members = ["client"]
+# The fork is its own workspace. Without this, Cargo would make every Pumpkin crate the client
+# depends on by path a member of ours, and their `*.workspace = true` fields would resolve here.
+exclude = ["pumpkin"]
 
-[dependencies]
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0"
+# Matches pumpkin/Cargo.toml, so the client never needs a newer compiler than the fork.
+rust-version = "1.96"
+
+[workspace.dependencies]
+# Same versions as pumpkin/Cargo.toml, so the build has one copy of each.
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = [
+    "env-filter",
+    "fmt",
+    "ansi",
+] }
+
+# Profiles below mirror pumpkin/Cargo.toml. Cargo only reads profiles from the root manifest, so
+# without these the fork would build with different settings here than in pumpkin/.
+
+[profile.release]
+lto = true
+strip = "debuginfo"
+codegen-units = 1
+
+[profile.release.package.pumpkin-data]
+codegen-units = 16
+
+[profile.release.package.pumpkin-core]
+codegen-units = 16
+
+[profile.release.package.pumpkin-world]
+codegen-units = 16
+
+[profile.release.package.pumpkin-protocol]
+codegen-units = 16
+
+[profile.release.package.pumpkin-wasm-host]
+codegen-units = 16
+
+[profile.release.package.pumpkin-wasm-host-common]
+codegen-units = 16
+
+[profile.release.package.pumpkin-wasm-host-v0_1]
+codegen-units = 16
+
+[profile.release.package.pumpkin-wasm-host-v0_2]
+codegen-units = 16
+
+[profile.bench]
+debug = true
+
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false
+
+# Pumpkin sets `[profile.dev] debug = false` for everything. We apply it to dependencies only, so
+# our own crates keep debug info and backtraces have line numbers.
+[profile.dev.package."*"]
+debug = false
