@@ -4,6 +4,17 @@ Limonite Client (`limonite-client`) is a Minecraft Bedrock Edition client in Rus
 Pumpkin server for singleplayer. The full design lives in `docs/PLAN.md`. Read it before
 starting any task, and treat it as the source of truth for architecture decisions.
 
+## Next session: start here
+
+- **Progress and dev setup:** `docs/STATUS.md`. Read it first, and update it whenever a milestone
+  step lands.
+- **Milestone 1 (Workspace + fork seam) is planned and approved (2026-10-19):**
+  `docs/milestones/m1-plan.md`. Step 1 is done; execute steps 2–7 in order.
+  - No new plan-mode round is needed for M1. Go back to the owner only if the real code
+    contradicts the plan, or the plan says to ask (e.g. the `exclude` error, the join test,
+    pushing).
+- **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`.
+
 ## Architecture at a glance
 
 ```
