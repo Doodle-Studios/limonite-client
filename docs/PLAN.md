@@ -10,7 +10,7 @@ Limonite Client is a Minecraft Bedrock Edition client written in Rust, shipped a
 
 - Singleplayer with zero network overhead: the client and embedded server talk through an in-memory channel, not sockets.
 - Open to LAN from inside a running world, without the host losing performance.
-- A transport abstraction that can later carry peer-to-peer joining, Mojang-style.
+- A transport abstraction that can later carry peer-to-peer joining, Mojang-style (NetherNet, Bedrock's WebRTC transport).
 - Drag-and-drop Iris shader packs (made for Java Edition) and Bedrock resource packs.
 - Squeeze the GPU: GPU-driven rendering, hardware ray tracing where the hardware has it, honest performance warnings where it doesn't.
 
@@ -37,18 +37,29 @@ One process, two threads, one seam. The main thread runs the window, renderer an
 
 &#91;embedded content: architecture · client, embedded server, transports\]
 
-The host's packets never leave memory. RakNet only exists while LAN is open, and P2P (dashed) is a later transport behind the same trait.
+The host's packets never leave memory. NetherNet only listens while LAN is open, and P2P (dashed) is a later transport behind the same trait. (The embedded diagram above predates M0 and still says RakNet; read it as NetherNet.)
 
 ## Server backend: embedded Pumpkin fork
 
 The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pumpkin), linked as a crate and run inside the client process. Pumpkin's Bedrock support is still work in progress upstream, so expect gaps and plan to upstream fixes where possible.
 
+**Upstream speaks NetherNet, not RakNet** (found in M0; details in `docs/recon/m0-pumpkin-bedrock.md`).
+- NetherNet is Mojang's WebRTC transport: HTTP signalling on TCP 19132, then ICE and server-list status sharing UDP 19132, then DTLS-encrypted data channels. LAN discovery runs on UDP 7551.
+- Legacy RakNet clients are rejected.
+- Pumpkin accepts exactly one Bedrock protocol: 1.26.51 / 2193 at fork commit `aac0a82`.
+
 **What the fork changes**
 
 - Adds a `Transport` trait: the one seam where a player's packets enter and leave the server.
-- Strips the Java Edition listener behind a cargo feature, so it compiles out rather than being deleted.
+  - It replaces the `BedrockClient::session: Arc<NetherNetSession>` field, keeping its six method names (`send`, `recv`, `flush_reliable`, `close`, `is_closed`, `client_public_key`) so call sites don't change.
+  - The NetherNet branch of the accept loop becomes an `accept_bedrock(transport, addr)` helper that local connections reuse.
+- Puts the Java Edition listener behind a cargo feature, so it compiles out rather than being deleted. That covers the TCP bind, query and LAN broadcast. Java protocol types stay compiled, because they're used in 93 files of `pumpkin-core`.
 - Adds a control API exposed only to the client binary: open/close LAN, pause, save, shut down. External players can never reach it.
-- Moves Bedrock session setup (auth, compression, encryption) inside the RakNet transport, so local players skip it entirely.
+- Lets local players skip session setup without moving code:
+  - Encryption is DTLS inside NetherNet, so `LocalChannel` never does it.
+  - Compression only turns on when the client sends `RequestNetworkSettings`, and the host never sends it.
+  - The host logs in through a local path, decided in M2.
+- Adds client-side packet codecs behind a `client` feature in `pumpkin-protocol`. Clientbound packets only derive `PacketWrite` and most serverbound ones only `PacketRead`; the client needs the opposite. This is the one change to existing files that isn't a seam: it's mechanical (one derive per packet file), and a good upstream candidate.
 
 **What the fork keeps untouched**: world generation, physics, mob AI, ticking, chunk storage, saving, commands.
 
@@ -56,13 +67,15 @@ The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pu
 
 | Transport | When active | Carries | Notes |
 | --- | --- | --- | --- |
-| `LocalChannel` | Always, for the host | Packet structs via `tokio::sync::mpsc`, large ones in `Arc<T>` | No serialisation, compression, encryption or auth |
-| `RakNet` | Only while LAN is open | Encoded, compressed, encrypted bytes over UDP 19132 | Spawned and torn down by the control API |
-| `P2P` | Later | Encoded bytes over a NAT-traversed link | Needs a signalling server, STUN, TURN fallback |
+| `LocalChannel` | Always, for the host | Uncompressed Bedrock batch bytes via `tokio::sync::mpsc` | No WebRTC, DTLS, fragmentation, compression or auth. One in-process encode/decode remains; measure it in M2 |
+| `NetherNet` | Only while LAN is open | Compressed batches over WebRTC data channels (DTLS-encrypted, ≤10 kB fragments) | Upstream's existing transport. Listener, status responder and LAN discovery are started and stopped by the control API |
+| `P2P` | Later | NetherNet with our own signalling | ICE/STUN already exist in NetherNet; needs a signalling server and TURN fallback |
 
-**Packet types are shared.** The client uses Pumpkin's own Bedrock packet definitions, not a separate protocol crate. One definition on both sides of the channel means the client and server can never disagree on a protocol version. This replaces the earlier idea of using bedrock-rs.
+**Why bytes, not structs, on `LocalChannel`.** Pumpkin turns each packet into bytes in game code, before the transport ever sees it (`BedrockClient::serialize_packet`, called from 54 `ClientPlatform::Bedrock` sites across 13 files). Passing structs would mean rewriting all of those call sites, which breaks the small-diff rule. Bytes still skip everything expensive. If M2's measurements show chunk packets dominate, special-case them with `Arc` then.
 
-**Lazy broadcast encoding.** Many packets go to every player. With mixed transports, the local player receives the struct; the first remote recipient triggers serialisation, and the bytes are cached and reused for every other remote player. With LAN closed, nothing is ever serialised.
+**Packet types are shared.** The client uses Pumpkin's own Bedrock packet definitions, not a separate protocol crate. One definition on both sides of the channel means the client and server can never disagree on a protocol version. This replaces the earlier idea of using bedrock-rs. The structs need codecs in both directions first (see "What the fork changes").
+
+**Broadcast encoding.** Pumpkin already serialises each broadcast once per recipient, with that recipient's compression settings. The host's copy is never compressed. Caching one encoding across all remote recipients is a possible M7 optimisation, but measure first.
 
 **Fork hygiene**
 
@@ -70,6 +83,7 @@ The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pu
 - New code goes in new modules; edits to existing Pumpkin files are kept to the seams listed above.
 - Rebase on upstream regularly. A small diff keeps `git rebase upstream/master` painless, which matters while upstream is actively fixing Bedrock.
 - Each seam gets a short doc comment saying why it exists.
+- On Windows, clone with `git config core.longpaths true`; some Pumpkin paths exceed `MAX_PATH`.
 
 **Repository layout**
 
@@ -118,7 +132,7 @@ loop {
 | Server tick | Up to 50 ms (20 ticks/s) | Client-side prediction of the local player, corrected when the server disagrees |
 | Other entities' movement | Updates once per tick | Interpolate between the last two server positions |
 
-**Lighting.** Bedrock servers are not expected to send light data, so the client computes it: flood-fill sky light downward and block light outward, minus 1 per block. Relight incrementally on block change; this runs often and must be fast. Verify against what Pumpkin actually sends before building.
+**Lighting.** Bedrock servers are not expected to send light data, so the client computes it: flood-fill sky light downward and block light outward, minus 1 per block. Relight incrementally on block change; this runs often and must be fast. Verified in M0: Pumpkin's `LevelChunk` carries block storage, biomes and block actors only, with no light, so client lighting is required.
 
 **Input.** `winit` for keyboard and mouse, `gilrs` for controllers. All bindings go through a rebindable keymap from day one; nothing hardcodes a key.
 
@@ -252,11 +266,15 @@ UI is three separate systems: the client's own retained-mode UI, server forms, a
 
 Each milestone ends in something runnable and is done only when its acceptance check passes. Do them in order; later ones assume the seams from earlier ones.
 
-0. **Recon.** Clone Pumpkin, build it, enable Bedrock, offline mode, join with the official Bedrock client. Trace where a Bedrock connection is accepted and where packets are dispatched to a player.
+0. ✅ **Recon.** Clone Pumpkin, build it, enable Bedrock, offline mode, join with the official Bedrock client. Trace where a Bedrock connection is accepted and where packets are dispatched to a player.
    - Accept: official client joins the stock Pumpkin build; a short written note maps the accept and dispatch code paths and proposes the exact `Transport` seam.
-1. **Workspace + fork seam.** Cargo workspace, fork as submodule, `Transport` trait added, RakNet moved behind it, Java listener behind a feature flag, `tracing` wired up.
-   - Accept: official Bedrock client still joins the fork over RakNet; fork diff is small and confined to the seam; Java compiles out.
+   - **Done 2026-10-19.** Bedrock 1.26.52 joined the fork at `aac0a82` over NetherNet in offline mode. The note is `docs/recon/m0-pumpkin-bedrock.md`.
+1. **Workspace + fork seam.** Cargo workspace, fork as submodule, `Transport` trait added, NetherNet moved behind it, Java listener behind a feature flag, `tracing` wired up.
+   - When `pumpkin/` becomes a submodule, remove the `/pumpkin/` line from `.gitignore`; otherwise git ignores the submodule path.
+   - Accept: official Bedrock client still joins the fork over NetherNet; fork diff is small and confined to the seam; the Java listener compiles out.
 2. **Headless embedded client.** Client binary starts Pumpkin on a background tokio thread, connects through `LocalChannel`, logs every packet name it receives, then sends movement.
+   - Decide the host's login path (unsigned tokens vs a local login seam; recon §6) and add the client-side packet codecs.
+   - Measure `LocalChannel`'s encode/decode cost.
    - Accept: spawn completes, chunks arrive, the server sees the player move, with no socket opened.
 3. **Chunk map.** Decode sub-chunks and palettes into world state; dump a top-down map image of loaded chunks.
    - Accept: map image matches what the official client sees at the same seed and position.
@@ -266,7 +284,7 @@ Each milestone ends in something runnable and is done only when its acceptance c
    - Accept: a full session of walking, building and saving with no visible input lag; reload restores the world.
 6. **GPU-driven renderer.** Compute meshing, GPU culling, indirect draws, capability tiers, benchmark + warnings.
    - Accept: measurable frame-time improvement over milestone 4 at the same render distance; tier chosen from features, not vendor.
-7. **Open to LAN.** Control API toggles the RakNet transport live; lazy broadcast encoding.
+7. **Open to LAN.** Control API starts and stops the NetherNet listener, status responder and LAN discovery live; the host's packets stay uncompressed; optionally cache one encoding across remote recipients, if measurements justify it.
    - Accept: a second device joins mid-session; host frame times unchanged with LAN closed and within noise with one guest.
 8. **Resource packs.** Full VFS stacking and merge rules, flipbooks, Molang crate, entity models and animations, sounds, hot reload.
    - Accept: a popular third-party Bedrock pack renders blocks, items and mobs correctly; Molang suite passes on vanilla expressions.
@@ -274,7 +292,7 @@ Each milestone ends in something runnable and is done only when its acceptance c
    - Accept: the chosen 2–3 test packs load and look right versus Iris on Java at the same scene.
 10. **Extras.** Native ray tracing path, JSON UI subset, server forms, Java pack import, particles.
     - Accept: per feature, defined when the milestone starts.
-11. **P2P.** Signalling server, NAT traversal, `P2P` transport.
+11. **P2P.** Signalling server and TURN fallback on top of the NetherNet transport; ICE and STUN already exist there.
     - Accept: two machines on different networks join with no port forwarding.
 
 ## Risks, open questions, references
@@ -290,17 +308,20 @@ The biggest risk is upstream Pumpkin's Bedrock support being incomplete; the big
 | Iris scope explosion | Shader work eats the project | Fixed 2–3 pack test suite; defer the long tail |
 | wgpu RT is experimental | RT path churns between wgpu versions | Keep RT behind the escape hatch and the capability gate |
 | Bedrock protocol changes each game update | External LAN guests on newer clients can't join | Pin the guest client version; follow upstream Pumpkin's protocol bumps |
+| Pumpkin compiles Mojang's vanilla Java datapack into the binary | A distributed Limonite binary would contain Mojang data (worldgen, loot tables, recipes, tags), breaking the "never bundle Mojang assets" rule. `pumpkin-data`'s build script downloads the Java server jar, and generated code `include_str!`s its JSON | Local dev builds only until solved. Decide before any release; one option is to fetch the server jar from Mojang on the user's machine at first run and load the datapack at runtime |
+| Bedrock auto-updates past Pumpkin's exact protocol | The official client, our control, can't join at all: Pumpkin accepts one exact protocol | Record the client version in each milestone's test; rebase onto upstream protocol bumps; avoid updating the test client mid-milestone |
 | Asset and licence issues | Can't distribute | Load vanilla assets from the user's install; client is GPL-3.0; never bundle packs |
 | Public servers and Realms | Custom clients can trip anti-cheat or break terms | Out of scope; test only on the embedded server and own LAN |
 
 **Open questions**
 
-- [ ] Does Pumpkin send any light data to Bedrock clients, or is client lighting required?
+- [x] Does Pumpkin send any light data to Bedrock clients, or is client lighting required? **No light data; client lighting is required** (M0).
 - [ ] Which ECS: `bevy_ecs` or `hecs`?
 - [ ] Which 2–3 Iris packs form the test suite?
 - [ ] Exact form of the control API: function calls on a handle, or a dedicated control channel?
-- [ ] How does the host's identity and permission level work when there's no login on `LocalChannel`?
-- [ ] Which Bedrock protocol version is upstream Pumpkin targeting right now?
+- [ ] How does the host's identity and permission level work when there's no login on `LocalChannel`? (M0 mapped what login requires and two options, in recon §6; decide in M2.)
+- [ ] How does the embedded server get Mojang's vanilla datapack without the binary bundling it? (Found in M0; see the Risks table. Must be settled before any release.)
+- [x] Which Bedrock protocol version is upstream Pumpkin targeting right now? **1.26.51, protocol 2193, exact match only** (fork commit `aac0a82`, M0).
 
 **References**
 
@@ -310,3 +331,4 @@ The biggest risk is upstream Pumpkin's Bedrock support being incomplete; the big
 - [GeyserMC](https://github.com/GeyserMC): Java ↔ Bedrock mappings
 - [Iris](https://github.com/IrisShaders/Iris): reference for shader pack pipeline behaviour
 - gophertunnel (Go) and PrismarineJS bedrock-protocol (JS): reference protocol implementations
+- Pumpkin's NetherNet implementation: `pumpkin/crates/pumpkin-core/src/net/bedrock/nethernet/`; the M0 walkthrough is in `docs/recon/m0-pumpkin-bedrock.md`

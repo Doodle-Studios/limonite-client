@@ -11,12 +11,12 @@ starting any task, and treat it as the source of truth for architecture decision
 │ main thread (winit)                                        │
 │   Renderer (wgpu)  <──  World state  ──>  UI               │
 │                             ▲                              │
-│                             │ in-memory channel (structs)  │
+│                             │ in-memory channel (bytes)    │
 │                             ▼                              │
 │ background thread (tokio): forked Pumpkin                  │
 │   LocalChannel  <──>  Game core (worldgen, physics, AI)    │
 │                        │                  │                │
-│                   RakNet (LAN only)   P2P (later)          │
+│                   NetherNet (LAN)     P2P (later)          │
 └────────────────────────┼──────────────────┼────────────────┘
                          ▼                  ▼
                      LAN guests        remote peers
