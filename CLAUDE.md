@@ -8,10 +8,12 @@ starting any task, and treat it as the source of truth for architecture decision
 
 - **Progress and dev setup:** `docs/STATUS.md`. Read it first, and update it whenever a milestone
   step lands.
-- **Milestones 0 and 1 are done (2026-10-19). Next is Milestone 2, the headless embedded client.**
-  - Start it in plan mode. "Notes for M2" in `docs/STATUS.md` lists the known pitfalls.
-  - Write the approved plan to `docs/milestones/m2-plan.md`, as M1 did.
-  - Nothing is pushed yet. Ask the owner before pushing the superproject or the fork.
+- **Milestones 0 and 1 are done (2026-10-19). Milestone 2, the headless embedded client, is
+  planned (2026-10-20) and not started.**
+  - Execute `docs/milestones/m2-plan.md` step by step. Step 1 needs the owner to join with the
+    official client.
+  - Only the fork's `limonite` branch is pushed; the superproject has no remote. Ask the owner
+    before pushing anything.
 - **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`, and the "Deviations"
   section of `docs/milestones/m1-plan.md`.
 
