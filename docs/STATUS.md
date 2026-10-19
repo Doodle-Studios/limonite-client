@@ -10,8 +10,13 @@ _Last updated: 2026-10-19._
 
 - **Current milestone:** 2, the headless embedded client. **Not planned yet.**
 - **Next step:** plan M2 in plan mode (CLAUDE.md), starting from "Notes for M2" below.
-- **Not pushed:** neither superproject `main` nor the fork's `limonite` branch. Until `limonite` is
-  pushed to the fork, the submodule commit only resolves on this machine. Ask the owner first.
+- **Pushed:** the fork's `limonite` branch, at `80b19bb`, on 2026-10-19, with the owner's OK. It
+  tracks `origin/limonite`.
+- **Not pushed:** superproject `main`, which has no remote yet. Ask the owner before pushing
+  anything.
+- **Repo moved:** on that push, GitHub said the fork moved to
+  `https://github.com/Doodle-Studios/Pumpkin.git`. The old URL still redirects. `origin` and
+  `.gitmodules` still use the old URL; switch them only once the owner confirms.
 
 ## Done
 
