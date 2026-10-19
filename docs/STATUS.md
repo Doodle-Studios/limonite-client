@@ -4,12 +4,14 @@ A living page: where the project is, how to build and run it, and what bites. Up
 milestone step lands. Architecture decisions live in `docs/PLAN.md`; this page is about progress
 and environment.
 
-_Last updated: 2026-10-19._
+_Last updated: 2026-10-20._
 
 ## Where we are
 
-- **Current milestone:** 2, the headless embedded client. **Not planned yet.**
-- **Next step:** plan M2 in plan mode (CLAUDE.md), starting from "Notes for M2" below.
+- **Current milestone:** 2, the headless embedded client. **Planned and approved on 2026-10-20;
+  not started.** The plan is `docs/milestones/m2-plan.md`.
+- **Next step:** M2 Step 1, capturing the official client's packets as golden test fixtures.
+  The owner has to join once with Bedrock 1.26.52.
 - **Pushed:** the fork's `limonite` branch, at `80b19bb`, on 2026-10-19, with the owner's OK. It
   tracks `origin/limonite`.
 - **Not pushed:** superproject `main`, which has no remote yet. Ask the owner before pushing
@@ -146,6 +148,8 @@ cargo clippy -p pumpkin-core --all-targets
 - **Untracked on purpose:** `.idea/` (RustRover) and `.claude/settings.local.json`.
 
 ## Notes for M2 (found while planning M1)
+
+All of these are handled in `docs/milestones/m2-plan.md`; they stay here for the record.
 
 - **Logger:** Pumpkin's `init_logger` calls `.init()`, which panics if a global `tracing`
   subscriber already exists. The embedded server must not call it; the client owns logging.
