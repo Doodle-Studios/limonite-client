@@ -40,17 +40,9 @@ codegen-units = 16
 [profile.release.package.pumpkin-protocol]
 codegen-units = 16
 
-[profile.release.package.pumpkin-wasm-host]
-codegen-units = 16
-
-[profile.release.package.pumpkin-wasm-host-common]
-codegen-units = 16
-
-[profile.release.package.pumpkin-wasm-host-v0_1]
-codegen-units = 16
-
-[profile.release.package.pumpkin-wasm-host-v0_2]
-codegen-units = 16
+# Pumpkin also sets codegen-units = 16 for pumpkin-wasm-host, -common, -v0_1 and -v0_2. Nothing
+# here builds the plugin host, and Cargo warns on every build about overrides that match no
+# package, so they're left out. Add them back if the client ever depends on the plugin host.
 
 [profile.bench]
 debug = true
