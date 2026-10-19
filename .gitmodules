@@ -1,4 +1,4 @@
 [submodule "pumpkin"]
 	path = pumpkin
-	url = https://github.com/LaDoodleInTheHat/Pumpkin.git
+	url = https://github.com/Doodle-Studios/Pumpkin.git
 	branch = limonite
