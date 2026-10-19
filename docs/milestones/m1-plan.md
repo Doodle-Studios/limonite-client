@@ -1,7 +1,7 @@
 # Milestone 1 plan: Workspace + fork seam
 
-**Status:** approved by the owner on 2026-10-19; not started. Step 1 (the handoff) is done.
-Execute steps 2–7 in order.
+**Status:** ✅ **done 2026-10-19.** It was approved by the owner the same day. The plan below is
+kept as written; "Deviations" at the end records where the real code differed.
 - **Before starting:** read `docs/STATUS.md` for the environment and gotchas, and
   `docs/recon/m0-pumpkin-bedrock.md` for why the seam looks like this.
 - **If the real code contradicts this plan,** stop and tell the owner (CLAUDE.md rule).
@@ -237,3 +237,29 @@ where `LocalChannel` gives it a second caller. Doing it now would be code with n
    - Every commit ends with the Co-Authored-By line.
 6. **Ask the owner before pushing.** The `limonite` branch has to be on the fork for the
    submodule commit to be fetchable from other machines. Never push without a yes.
+
+## Deviations (what actually happened)
+
+1. **The `exclude` error was a different message with the same cause.** Without `exclude`, Cargo
+   failed with "error inheriting `version` from workspace root manifest's
+   `workspace.package.version` … was not defined", not "member of the wrong workspace". Cargo had
+   made `pumpkin-core` a member of our workspace, so its `version.workspace = true` looked in our
+   root manifest, which has no version.
+2. **The impl uses `Self::send(self, ..)`, not `NetherNetSession::send(self, ..)`.** Pumpkin denies
+   `clippy::use_self`. It's still the inherent method, because inherent methods take priority over
+   trait methods. For the same reason, doc comments put `NetherNet` in backticks (`doc_markdown`).
+3. **The four `pumpkin-wasm-host*` release overrides were dropped from the root** (`7ff616c`). No
+   root crate builds them, and Cargo warned about each one on every build. A comment in the root
+   `Cargo.toml` says when to restore them. The owner delegated this decision.
+4. **The startup banner was left alone.** `crates/pumpkin/src/main.rs:194` prints the Java address
+   whenever `networking.java.enabled` is set, even with the listener compiled out. The socket check
+   showed no TCP 25565 listener; only TCP 19132 was bound. Fixing the banner would make a sixth fork
+   file, so it's a STATUS.md gotcha instead. The owner delegated this decision.
+5. **The join test ran twice.** The first run was stopped unjoined while the owner was away. The
+   second run, with the same binary and config, joined (fork `80b19bb`, 2026-10-19 15:46).
+   Sequence: NetherNet accept, `HAVE_ALL_PACKS`, `COMPLETED`, `<gamertag> joined the game`, render
+   distance 8 → 16, `initialized (Runtime ID: 1)`.
+
+Results: clippy was clean both ways, 34/34 `net::bedrock` tests passed, the `--no-default-features`
+release build took 4 m 59 s, and the client printed
+`Limonite Client 0.1.0 starting; embedded Pumpkin targets Bedrock 1.26.51 (protocol 2193)`.
