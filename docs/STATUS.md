@@ -14,9 +14,8 @@ _Last updated: 2026-10-19._
   tracks `origin/limonite`.
 - **Not pushed:** superproject `main`, which has no remote yet. Ask the owner before pushing
   anything.
-- **Repo moved:** on that push, GitHub said the fork moved to
-  `https://github.com/Doodle-Studios/Pumpkin.git`. The old URL still redirects. `origin` and
-  `.gitmodules` still use the old URL; switch them only once the owner confirms.
+- **Fork location:** the owner moved the fork to `Doodle-Studios/Pumpkin`. `.gitmodules` and
+  `origin` point there. The old `LaDoodleInTheHat/Pumpkin` URL redirects, but don't use it.
 
 ## Done
 
@@ -53,7 +52,7 @@ Windows 11, with Git Bash and PowerShell both used.
 - VS 2022 C toolchain and CMake are installed. There is **no Python**; use PowerShell for JSON.
 
 **Pumpkin fork: `pumpkin/`**
-- A git submodule of `https://github.com/LaDoodleInTheHat/Pumpkin`, branch **`limonite`**, at
+- A git submodule of `https://github.com/Doodle-Studios/Pumpkin`, branch **`limonite`**, at
   `80b19bb`: upstream `aac0a82` (2026-10-18) plus the two M1 seam commits. Its git directory is
   `.git/modules/pumpkin`.
 - `upstream` points at `https://github.com/Pumpkin-MC/Pumpkin.git`, whose default branch is
