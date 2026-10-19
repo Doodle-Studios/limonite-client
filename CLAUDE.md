@@ -8,12 +8,12 @@ starting any task, and treat it as the source of truth for architecture decision
 
 - **Progress and dev setup:** `docs/STATUS.md`. Read it first, and update it whenever a milestone
   step lands.
-- **Milestone 1 (Workspace + fork seam) is planned and approved (2026-10-19):**
-  `docs/milestones/m1-plan.md`. Step 1 is done; execute steps 2–7 in order.
-  - No new plan-mode round is needed for M1. Go back to the owner only if the real code
-    contradicts the plan, or the plan says to ask (e.g. the `exclude` error, the join test,
-    pushing).
-- **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`.
+- **Milestones 0 and 1 are done (2026-10-19). Next is Milestone 2, the headless embedded client.**
+  - Start it in plan mode. "Notes for M2" in `docs/STATUS.md` lists the known pitfalls.
+  - Write the approved plan to `docs/milestones/m2-plan.md`, as M1 did.
+  - Nothing is pushed yet. Ask the owner before pushing the superproject or the fork.
+- **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`, and the "Deviations"
+  section of `docs/milestones/m1-plan.md`.
 
 ## Architecture at a glance
 

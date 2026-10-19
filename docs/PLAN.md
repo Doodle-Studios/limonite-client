@@ -52,8 +52,8 @@ The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pu
 
 - Adds a `Transport` trait: the one seam where a player's packets enter and leave the server.
   - It replaces the `BedrockClient::session: Arc<NetherNetSession>` field, keeping its six method names (`send`, `recv`, `flush_reliable`, `close`, `is_closed`, `client_public_key`) so call sites don't change.
-  - The NetherNet branch of the accept loop becomes an `accept_bedrock(transport, addr)` helper that local connections reuse.
-- Puts the Java Edition listener behind a cargo feature, so it compiles out rather than being deleted. That covers the TCP bind, query and LAN broadcast. Java protocol types stay compiled, because they're used in 93 files of `pumpkin-core`.
+  - The NetherNet branch of the accept loop becomes an `accept_bedrock(transport, addr)` helper that local connections reuse. This lands in M2 with `LocalChannel`, its second caller; M1 left the accept loop unchanged.
+- Puts the Java Edition listener behind an opt-in `java-listener` cargo feature in `pumpkin-core`, so it compiles out rather than being deleted. That covers the TCP bind, query and LAN broadcast. The stock `pumpkin` binary turns the feature on by default; Limonite's client never does. Java protocol types stay compiled, because they're used in 93 files of `pumpkin-core`.
 - Adds a control API exposed only to the client binary: open/close LAN, pause, save, shut down. External players can never reach it.
 - Lets local players skip session setup without moving code:
   - Encryption is DTLS inside NetherNet, so `LocalChannel` never does it.
@@ -269,9 +269,10 @@ Each milestone ends in something runnable and is done only when its acceptance c
 0. ✅ **Recon.** Clone Pumpkin, build it, enable Bedrock, offline mode, join with the official Bedrock client. Trace where a Bedrock connection is accepted and where packets are dispatched to a player.
    - Accept: official client joins the stock Pumpkin build; a short written note maps the accept and dispatch code paths and proposes the exact `Transport` seam.
    - **Done 2026-10-19.** Bedrock 1.26.52 joined the fork at `aac0a82` over NetherNet in offline mode. The note is `docs/recon/m0-pumpkin-bedrock.md`.
-1. **Workspace + fork seam.** Cargo workspace, fork as submodule, `Transport` trait added, NetherNet moved behind it, Java listener behind a feature flag, `tracing` wired up.
+1. ✅ **Workspace + fork seam.** Cargo workspace, fork as submodule, `Transport` trait added, NetherNet moved behind it, Java listener behind a feature flag, `tracing` wired up.
    - When `pumpkin/` becomes a submodule, remove the `/pumpkin/` line from `.gitignore`; otherwise git ignores the submodule path.
    - Accept: official Bedrock client still joins the fork over NetherNet; fork diff is small and confined to the seam; the Java listener compiles out.
+   - **Done 2026-10-19.** Bedrock 1.26.52 joined the fork at `80b19bb` over NetherNet. The fork diff is five files (+81/−4). Java listener is compiled out: no TCP socket can be bound without the `java-listener` feature. A `--no-default-features` server with `networking.java.enabled = true` had no TCP 25565 listener. Plan and deviations: `docs/milestones/m1-plan.md`.
 2. **Headless embedded client.** Client binary starts Pumpkin on a background tokio thread, connects through `LocalChannel`, logs every packet name it receives, then sends movement.
    - Decide the host's login path (unsigned tokens vs a local login seam; recon §6) and add the client-side packet codecs.
    - Measure `LocalChannel`'s encode/decode cost.
