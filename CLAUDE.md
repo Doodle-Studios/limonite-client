@@ -9,7 +9,8 @@ starting any task, and treat it as the source of truth for architecture decision
 - **Progress and dev setup:** `docs/STATUS.md`. Read it first, and update it whenever a milestone
   step lands.
 - **Milestones 0, 1 and 2 are done** (M2 on 2026-10-20). **Milestone 3, the chunk map, is
-  next and not planned.** Start it in plan mode; STATUS.md has "Notes for M3".
+  planned and approved** (2026-10-20): `docs/milestones/m3-plan.md`. Execute it from Step 1. It
+  needs no new plan-mode round unless the real code contradicts it.
   - Both repos are public and pushed. The superproject is `Doodle-Studios/limonite-client`
     (`main`), and the fork is `Doodle-Studios/Pumpkin` (`limonite`, at `03b498c`). Ask the owner
     before pushing anything.
