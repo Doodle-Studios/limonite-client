@@ -1,3 +1,4 @@
+mod checks;
 mod embedded;
 mod login;
 mod packets;
@@ -15,16 +16,20 @@ use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 use crate::{
+    checks::Check,
     embedded::EmbeddedServer,
-    session::{Session, Stage},
+    session::{Session, Stage, TICK},
 };
 
-const USAGE: &str = "usage: limonite-client [--data-dir <path>] [--name <name>]";
+const USAGE: &str =
+    "usage: limonite-client [--data-dir <path>] [--name <name>] [--linger <seconds>]";
 
-/// The whole scripted session must finish within this.
-const SESSION_DEADLINE: Duration = Duration::from_secs(120);
-/// How long to keep playing after spawning, so chunks keep arriving.
-const AFTER_SPAWN: Duration = Duration::from_secs(1);
+/// Login and spawn must finish within this.
+const SPAWN_DEADLINE: Duration = Duration::from_secs(120);
+/// The walk: 40 ticks at 0.2 blocks a tick is 8 blocks east.
+const WALK_TICKS: u32 = 40;
+/// How long to wait for the server to apply the walk before checking it.
+const SETTLE: Duration = Duration::from_secs(5);
 
 /// Command-line options. Every path is absolute by the time parsing returns.
 struct Args {
@@ -32,18 +37,29 @@ struct Args {
     data_dir: PathBuf,
     /// The host's display name.
     name: String,
+    /// How long to stay in the world after the checks, still sending input,
+    /// so the process can be inspected from outside.
+    linger: Duration,
 }
 
 impl Args {
     fn parse(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
         let mut data_dir = PathBuf::from("run/client");
         let mut name = "Limonite".to_string();
+        let mut linger = Duration::ZERO;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--data-dir" => {
                     data_dir = args.next().ok_or("--data-dir needs a path")?.into();
                 }
                 "--name" => name = args.next().ok_or("--name needs a name")?,
+                "--linger" => {
+                    let secs = args.next().ok_or("--linger needs a number of seconds")?;
+                    let secs = secs
+                        .parse()
+                        .map_err(|_| format!("--linger: `{secs}` isn't a number of seconds"))?;
+                    linger = Duration::from_secs(secs);
+                }
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
@@ -51,7 +67,11 @@ impl Args {
         // directory changes later, and a relative path would change meaning.
         let data_dir = std::path::absolute(&data_dir)
             .map_err(|err| format!("can't resolve {}: {err}", data_dir.display()))?;
-        Ok(Self { data_dir, name })
+        Ok(Self {
+            data_dir,
+            name,
+            linger,
+        })
     }
 }
 
@@ -102,9 +122,9 @@ fn main() -> ExitCode {
     result
 }
 
-/// The scripted host session: log in, spawn, and keep playing for a moment.
+/// The scripted host session: log in, spawn, walk east, check the move on the
+/// server, optionally linger, and report.
 fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
-    let deadline = Instant::now() + SESSION_DEADLINE;
     let mut session = match Session::connect(&server.connector, &args.name) {
         Ok(session) => session,
         Err(err) => {
@@ -113,23 +133,81 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
         }
     };
 
-    if let Err(err) = session.run_until(deadline, |s| s.stage() == Stage::Spawned) {
-        error!("Didn't spawn: {err}");
-        return ExitCode::FAILURE;
+    let spawned = session.run_until(Instant::now() + SPAWN_DEADLINE, |s| {
+        s.stage() == Stage::Spawned
+    });
+    let mut checks = vec![match &spawned {
+        Ok(()) => Check::new(
+            "spawn",
+            true,
+            "PlayerSpawn received; SetLocalPlayerAsInitialized sent".to_string(),
+        ),
+        Err(err) => Check::new("spawn", false, err.to_string()),
+    }];
+
+    match (spawned, session.spawn()) {
+        (Ok(()), Some(spawn)) => {
+            checks.push(walk_and_check(&mut session, server, &spawn));
+            linger(&mut session, args.linger);
+        }
+        _ => checks.push(Check::new(
+            "movement",
+            false,
+            "not checked: never spawned".to_string(),
+        )),
     }
-    let keep_playing_until = Instant::now() + AFTER_SPAWN;
-    if let Err(err) = session.run_until(deadline, |_| Instant::now() >= keep_playing_until) {
-        error!("Lost the session after spawning: {err}");
-        return ExitCode::FAILURE;
-    }
-    info!(
-        "Spawned; {} LevelChunk packets so far",
-        session.level_chunks()
-    );
+
+    let chunks = session.level_chunks();
+    checks.push(Check::new(
+        "chunks",
+        chunks > 4,
+        format!("{chunks} LevelChunk packets received (needs more than 4)"),
+    ));
     // Dropping the session closes the connection: the host leaves the game
     // before the server stops.
     drop(session);
-    ExitCode::SUCCESS
+
+    if checks::report(&checks) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// Walks east, then waits until the server's copy of the player has moved
+/// (or [`SETTLE`] passes) and checks it.
+fn walk_and_check(session: &mut Session, server: &EmbeddedServer, spawn: &session::Spawn) -> Check {
+    info!("Walking east for {WALK_TICKS} ticks");
+    session.walk(WALK_TICKS);
+    let walk_deadline = Instant::now() + TICK * (WALK_TICKS + 20);
+    if let Err(err) = session.run_until(walk_deadline, |s| !s.is_walking()) {
+        return Check::new("movement", false, format!("walk interrupted: {err}"));
+    }
+    // The server applies input on its own tick thread, a tick or more later.
+    // Polling its state each tick, rather than sleeping a fixed time, keeps
+    // a slow (debug) server from failing the check. Timing out here is fine:
+    // the check below reports what the server has.
+    let _ = session.run_until(Instant::now() + SETTLE, |_| {
+        checks::movement(&server.server, spawn).passed()
+    });
+    checks::movement(&server.server, spawn)
+}
+
+/// Stays in the world for `duration`, still sending input, so the process can
+/// be inspected from outside (e.g. for open sockets).
+fn linger(session: &mut Session, duration: Duration) {
+    if duration.is_zero() {
+        return;
+    }
+    info!(
+        "Lingering for {} s; process id {}",
+        duration.as_secs(),
+        std::process::id()
+    );
+    let until = Instant::now() + duration;
+    if let Err(err) = session.run_until(until + TICK, |_| Instant::now() >= until) {
+        warn!("Session ended while lingering: {err}");
+    }
 }
 
 /// Process-wide setup that Pumpkin's own `main` does before anything else.

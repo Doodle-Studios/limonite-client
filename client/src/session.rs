@@ -50,6 +50,11 @@ const PLAY_MODE_SCREEN: u32 = 2;
 /// The `delta.y` the official client reports every tick while standing on the
 /// ground: one tick of gravity, cancelled by the collision.
 const STANDING_DELTA_Y: f32 = -0.078_4;
+/// How far the host walks each tick: about walking speed.
+const WALK_STEP: f32 = 0.2;
+/// The yaw that faces +X (east). Yaw 0 faces +Z, and yaw grows clockwise
+/// seen from above.
+const YAW_EAST: f32 = -90.0;
 
 /// How far the session has got. Each stage names what it's waiting for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -98,6 +103,8 @@ pub struct Session {
     position: Vector3<f32>,
     /// Ticks of input sent so far; also the input packets' tick number.
     input_tick: u64,
+    /// Ticks of walking still to do.
+    walk_ticks: u32,
     level_chunks: u32,
 }
 
@@ -114,6 +121,7 @@ impl Session {
             spawn: None,
             position: Vector3::new(0.0, 0.0, 0.0),
             input_tick: 0,
+            walk_ticks: 0,
             level_chunks: 0,
         };
         // No `RequestNetworkSettings` first: compression then never turns on,
@@ -127,8 +135,24 @@ impl Session {
         self.stage
     }
 
+    pub const fn spawn(&self) -> Option<Spawn> {
+        self.spawn
+    }
+
     pub const fn level_chunks(&self) -> u32 {
         self.level_chunks
+    }
+
+    /// Walks east (+X) for `ticks` ticks, starting next tick.
+    ///
+    /// Only the reported position moves; there is no client physics yet, and
+    /// the server trusts what the client reports. This tests the transport.
+    pub const fn walk(&mut self, ticks: u32) {
+        self.walk_ticks = ticks;
+    }
+
+    pub const fn is_walking(&self) -> bool {
+        self.walk_ticks > 0
     }
 
     /// Runs ticks until `done` returns true or `deadline` passes.
@@ -175,7 +199,12 @@ impl Session {
         // Input starts with `StartGame`: the server ignores it until the
         // player has loaded, but any packet keeps its 10 s timeout away.
         if self.spawn.is_some() && self.stage != Stage::Disconnected {
-            let input = self.input();
+            let walking = self.walk_ticks > 0;
+            if walking {
+                self.position.x += WALK_STEP;
+                self.walk_ticks -= 1;
+            }
+            let input = self.input(walking);
             self.send(&input);
             self.input_tick += 1;
         }
@@ -271,7 +300,9 @@ impl Session {
             player_id: VarULong(spawn.runtime_id),
         });
         self.stage = Stage::Spawned;
-        info!("Spawned after {} LevelChunk packets", self.level_chunks);
+        // The server sends PlayerSpawn once more than 4 chunks are on their way;
+        // it can arrive before they do.
+        info!("Spawned ({} LevelChunk packets so far)", self.level_chunks);
     }
 
     fn send_pack_response(&self, response: u8) {
@@ -282,20 +313,29 @@ impl Session {
         });
     }
 
-    /// This tick's `PlayerAuthInput`: standing still on the ground.
-    fn input(&self) -> SPlayerAuthInput {
-        let (pitch, yaw) = self
+    /// This tick's `PlayerAuthInput`, on the ground, standing or walking east.
+    ///
+    /// While walking, the position, `delta` and `move_vec` move together, as
+    /// they would from the official client holding "forward" facing east.
+    fn input(&self, walking: bool) -> SPlayerAuthInput {
+        let (pitch, spawn_yaw) = self
             .spawn
             .map_or((0.0, 0.0), |spawn| (spawn.pitch, spawn.yaw));
-        // The flags the official client sets while standing on the ground.
+        // The flags the official client sets while on the ground.
         let mut input_data = Bitset::<66>::default();
         input_data.set(InputData::BlockBreakingDelayEnabled as usize, true);
         input_data.set(InputData::VerticalCollision as usize, true);
+        let (yaw, move_vec, delta_x) = if walking {
+            input_data.set(InputData::Up as usize, true);
+            (YAW_EAST, Vector2::new(0.0, 1.0), WALK_STEP)
+        } else {
+            (spawn_yaw, Vector2::new(0.0, 0.0), 0.0)
+        };
         SPlayerAuthInput {
             pitch,
             yaw,
             position: self.position,
-            move_vec: Vector2::new(0.0, 0.0),
+            move_vec,
             head_yaw: yaw,
             input_data,
             input_mode: VarUInt(INPUT_MODE_MOUSE),
@@ -304,7 +344,7 @@ impl Session {
             interact_pitch: pitch,
             interact_yaw: yaw,
             tick: VarULong(self.input_tick),
-            delta: Vector3::new(0.0, STANDING_DELTA_Y, 0.0),
+            delta: Vector3::new(delta_x, STANDING_DELTA_Y, 0.0),
             block_actions: None,
             item_interaction: None,
             item_stack_request: None,
@@ -312,7 +352,7 @@ impl Session {
             vehicle_unique_id: None,
             analog_move: Vector2::new(0.0, 0.0),
             camera_orientation: look_direction(pitch, yaw),
-            raw_move: Vector2::new(0.0, 0.0),
+            raw_move: move_vec,
         }
     }
 
