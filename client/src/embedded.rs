@@ -11,7 +11,7 @@ use pumpkin_config::PumpkinConfig;
 use pumpkin_core::{
     PumpkinServer, data::VanillaData, net::bedrock::local::LocalConnector, server::Server,
 };
-use tokio::runtime::{Handle, Runtime};
+use tokio::runtime::Runtime;
 use tracing::{error, info};
 
 /// How long shutdown waits for the runtime's leftover tasks after the world is saved.
@@ -41,23 +41,17 @@ pub fn config() -> PumpkinConfig {
 }
 
 /// A running embedded server.
-#[expect(
-    dead_code,
-    reason = "the host session uses these from the next step on"
-)]
 pub struct EmbeddedServer {
     /// Opens in-process connections to the server.
     pub connector: LocalConnector,
     /// The server's own state, shared with its threads. Read-only use from the
     /// client: checks and measurements.
     pub server: Arc<Server>,
-    /// The server's tokio runtime, for running a future on it from outside.
-    pub runtime: Handle,
     thread: thread::JoinHandle<()>,
 }
 
 /// What the server thread sends back once the server exists.
-type Ready = Result<(LocalConnector, Arc<Server>, Handle), String>;
+type Ready = Result<(LocalConnector, Arc<Server>), String>;
 
 impl EmbeddedServer {
     /// Starts the server and waits until it can accept connections.
@@ -76,10 +70,9 @@ impl EmbeddedServer {
 
         // `recv` fails only if the thread ended without reporting, e.g. a panic.
         match ready_rx.recv() {
-            Ok(Ok((connector, server, runtime))) => Ok(Self {
+            Ok(Ok((connector, server))) => Ok(Self {
                 connector,
                 server,
-                runtime,
                 thread,
             }),
             Ok(Err(err)) => {
@@ -148,11 +141,7 @@ async fn serve(config: PumpkinConfig, ready: &mpsc::Sender<Ready>) {
         }
     };
 
-    let started = (
-        server.local_listener.connector(),
-        server.server.clone(),
-        Handle::current(),
-    );
+    let started = (server.local_listener.connector(), server.server.clone());
     if ready.send(Ok(started)).is_err() {
         return;
     }
