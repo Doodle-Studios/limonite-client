@@ -10,6 +10,23 @@ license.workspace = true
 pumpkin-core = { path = "../pumpkin/crates/pumpkin-core" }
 # For the Bedrock version constants.
 pumpkin-world = { path = "../pumpkin/crates/pumpkin-world" }
+# The `client` feature adds the codecs a client needs: writers for what it sends and readers for
+# what it receives. Defaults off, so we state exactly what we use.
+pumpkin-protocol = { path = "../pumpkin/crates/pumpkin-protocol", default-features = false, features = [
+    "client",
+] }
+# The embedded server's configuration, built in code.
+pumpkin-config = { path = "../pumpkin/crates/pumpkin-config" }
+# P-384 types and the token parsers the server uses, to build and check the host's login.
+pumpkin-auth = { path = "../pumpkin/crates/pumpkin-auth" }
+# Vector types used in packet fields.
+pumpkin-util = { path = "../pumpkin/crates/pumpkin-util" }
 
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tokio.workspace = true
+rayon.workspace = true
+rustls.workspace = true
+bytes.workspace = true
+base64.workspace = true
+serde_json.workspace = true
