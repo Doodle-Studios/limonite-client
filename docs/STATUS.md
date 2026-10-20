@@ -8,14 +8,16 @@ _Last updated: 2026-10-20._
 
 ## Where we are
 
-- **Current milestone:** 2, the headless embedded client. **Planned and approved on 2026-10-20;
-  not started.** The plan is `docs/milestones/m2-plan.md`.
-- **Next step:** M2 Step 1, capturing the official client's packets as golden test fixtures.
-  The owner has to join once with Bedrock 1.26.52.
+- **Current milestone:** 3, the chunk map. **Not planned yet.** Start it in plan mode; read
+  "Notes for M3" below first.
+- **Milestone 2 is done (2026-10-20).** Plan, results and deviations: `docs/milestones/m2-plan.md`.
 - **Pushed:** the fork's `limonite` branch, at `80b19bb`, on 2026-10-19, with the owner's OK. It
   tracks `origin/limonite`.
-- **Not pushed:** superproject `main`, which has no remote yet. Ask the owner before pushing
-  anything.
+- **Not pushed:**
+  - the fork's four M2 commits (`limonite` is at `03b498c` locally);
+  - superproject `main`, which has no remote yet.
+
+  Ask the owner before pushing anything.
 - **Fork location:** the owner moved the fork to `Doodle-Studios/Pumpkin`. `.gitmodules` and
   `origin` point there. The old `LaDoodleInTheHat/Pumpkin` URL redirects, but don't use it.
 
@@ -25,6 +27,7 @@ _Last updated: 2026-10-20._
 | --- | --- | --- |
 | 0. Recon | Official Bedrock 1.26.52 joined stock Pumpkin (fork at `aac0a82`) over NetherNet; note in `docs/recon/m0-pumpkin-bedrock.md`; PLAN.md corrected | `main`: `54a51e6` scaffold, `341cdfb` recon note, `1f86cbe` PLAN.md corrections |
 | 1. Workspace + fork seam | Cargo workspace with `client/`; fork as a submodule; `Transport` trait with NetherNet behind it; Java listener behind `java-listener`; `tracing` in the client. Bedrock 1.26.52 joined a `--no-default-features` server at `80b19bb` with `java.enabled = true` and no TCP 25565 listener | `main`: `75ae93d` plan, `c27b3e4` workspace, `8b083d9` submodule, `7ed6d8e` tracing, `7ff616c` profile cleanup, `f8971b4` bump. Fork `limonite`: `df1f8e524` Transport, `80b19bb9b` java-listener |
+| 2. Headless embedded client | The client runs Pumpkin on a background thread and joins it as the host over an in-memory `LocalChannel`: unsigned-token login, spawn, 329 chunks, an 8-block walk the server saw (7.8), and no socket owned by the process. Client codecs in `pumpkin-protocol` behind `client`, golden-tested byte for byte against official-client captures. NetherNet regression join passed. `LocalChannel` cost measured; chunks dominate, so `Arc` comes after M3 | `main`: `b6e34c9` plan, `975b261` bump + deps, `d05e0e1` embedded server, `90e4f22` login and spawn, `441b7a1` walk + check, `b68d672` measure, `7d372f3` bump, `d4f045d` block-actor timing, `3d31577` packet names, then the tick. Fork `limonite`: `de0f7cedc` accept_bedrock, `7c1fa8063` LocalChannel, `85f58b5f6` client codecs, `03b498c47` NBT test fix |
 
 Key facts from M0 (details in the recon note, which is required reading before touching the fork):
 - **Transport:** upstream Bedrock is **NetherNet** (WebRTC), not RakNet.
@@ -45,6 +48,25 @@ Key facts from M1 (details and deviations in `docs/milestones/m1-plan.md`):
   `pumpkin-core` without it.
 - **Fork diff:** five files against `aac0a82`. Keep new fork code in new modules.
 
+Key facts from M2 (details, results and deviations in `docs/milestones/m2-plan.md`):
+- **The client's modules** (`client/src/`):
+  - `embedded.rs`: the server thread and its config, built in code;
+  - `login.rs`: the host's unsigned tokens;
+  - `packets.rs`: id-to-name table and batch framing;
+  - `session.rs`: the 20 Hz loop, the skeleton of the M4 main loop;
+  - `checks.rs` and `measure.rs`.
+- **The fork:**
+  - `net/bedrock/local.rs` holds `LocalChannel`, and `PumpkinServer::accept_bedrock` is the
+    shared accept path.
+  - `pumpkin-protocol`'s `client` feature adds the client-side codecs: derives on the structs,
+    and hand-written mirrors in `bedrock/client_codecs/`.
+  - The fork diff is 32 files against `aac0a82`, and edits to existing files are small.
+- **Framing on `LocalChannel`:** one packet per batch; no `0xFE` and no compression either way.
+- **Golden fixtures:** in `client_codecs/fixtures/`, with provenance in its README.
+  - The `SLogin` capture holds the owner's Xbox identity, so it lives only in
+    `run/captures/slogin.bin` (gitignored).
+  - Raw captures are in `run/captures/m2-official/`.
+
 ## Dev environment
 
 Windows 11, with Git Bash and PowerShell both used.
@@ -55,8 +77,8 @@ Windows 11, with Git Bash and PowerShell both used.
 
 **Pumpkin fork: `pumpkin/`**
 - A git submodule of `https://github.com/Doodle-Studios/Pumpkin`, branch **`limonite`**, at
-  `80b19bb`: upstream `aac0a82` (2026-10-18) plus the two M1 seam commits. Its git directory is
-  `.git/modules/pumpkin`.
+  `03b498c`: upstream `aac0a82` (2026-10-18) plus two M1 and four M2 commits. Its git directory
+  is `.git/modules/pumpkin`.
 - `upstream` points at `https://github.com/Pumpkin-MC/Pumpkin.git`, whose default branch is
   `master`.
 - **Fresh clone** (the superproject has no remote yet): after cloning it, set long paths before
@@ -66,13 +88,35 @@ Windows 11, with Git Bash and PowerShell both used.
 **Build and run the client** (run at the repo root):
 
 ```bash
-cargo run -p limonite-client
+RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --linger 30
 ```
 
-- Expect `Limonite Client 0.1.0 starting; embedded Pumpkin targets Bedrock 1.26.51 (protocol 2193)`.
-  `RUST_LOG` filters as usual; the default is `info`.
-- The first build takes about 3 minutes, because it compiles `pumpkin-core` and its dependencies
-  into the root `target/`, separate from `pumpkin/target/`.
+- **What it does:** starts the embedded server, joins as the host, walks 8 blocks east, then
+  logs one `PASS`/`FAIL` line each for spawn, movement and chunks. The exit code is non-zero
+  on any failure.
+- **Debug logging:** `limonite_client=debug` logs every packet name received.
+- **Flags:**
+  - `--data-dir <path>`: default `run/client`, gitignored. The client changes into it, because
+    Pumpkin writes its world there.
+  - `--name <name>`: the host's display name, default `Limonite`.
+  - `--linger <secs>`: stay in-world afterwards, for outside inspection; it logs the process id.
+  - `--measure`: the cost table. Only meaningful in a release build:
+
+    ```bash
+    CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo run --release -p limonite-client -- --measure
+    ```
+
+- **Run time:** a dev run takes about 5 s plus the linger. The dev build is fast enough: on a
+  fresh world, `StartGame` came 1.85 s after the resource packs.
+- **First builds:** about 3 minutes for dev, and 5 for release with the env vars. They compile
+  `pumpkin-core` into the root `target/`, separate from `pumpkin/target/`.
+- **Socket check** while it lingers, in PowerShell:
+
+  ```powershell
+  Get-NetTCPConnection -OwningProcess <pid>; Get-NetUDPEndpoint -OwningProcess <pid>
+  ```
+
+  Both should return nothing.
 
 **Mojang server jar** (needed only when `pumpkin/assets/datapack/` is missing, e.g. a fresh clone)
 - File: `run/mojang/server.jar`, Minecraft **Java 26.3**, from Mojang's version manifest.
@@ -101,6 +145,16 @@ cargo clippy -p pumpkin-core --all-targets
 
 - Run it again with `--features java-listener`. Then run
   `cargo test -p pumpkin-core --lib net::bedrock`.
+- For the client codecs, run `cargo clippy -p pumpkin-protocol --all-targets`, plain and with
+  `--features client`. Also run `cargo clippy -p pumpkin-core --all-targets --features
+  pumpkin-protocol/client`, because that's the feature-unified build the client produces. Then
+  run `cargo test -p pumpkin-protocol --features client`.
+- The `SLogin` golden test is `#[ignore]`d, because its capture can't be committed. Run it
+  locally:
+
+  ```bash
+  LIMONITE_SLOGIN_FIXTURE="C:\Users\LaDoodleInTheHat\Desktop\big projects\limonite-client\run\captures\slogin.bin" cargo test -p pumpkin-protocol --features client --lib reproduces_the_official_client_login -- --ignored
+  ```
 
 **Run the server**
 - Run from `run/pumpkin/` (gitignored); it writes its world and config there:
@@ -123,6 +177,17 @@ cargo clippy -p pumpkin-core --all-targets
 
 - **Long paths:** set `git config core.longpaths true` in any Pumpkin clone. Some paths exceed
   Windows `MAX_PATH`, and the checkout fails half-way without it.
+- **NBT order:** `NbtCompound` keeps its tags in a `HashMap`, so two equal compounds serialise
+  their tags in different orders. Compare decoded NBT in tests, never bytes, unless the
+  compound has one tag.
+- **Which structs go clientbound:** Pumpkin sends some serverbound structs to clients too:
+  `SText`, `SActorEvent`, `SAnimate`, `SRespawn` and `SContainerClose`. Look in
+  `bedrock/server/` as well as `bedrock/client/` when a packet id seems to be missing.
+- **The host's position persists:** the dev world saves the player per UUID, which comes from
+  the fixed dev `xid`. Every run starts where the last one ended, so delete `run/client/` for a
+  fresh world.
+- **Captures are private:** `run/captures/slogin.bin` contains the owner's Xbox token and
+  identity. Never commit it, paste it, or print its contents.
 - **Exact protocol:** Pumpkin accepts one Bedrock protocol only. Don't update the Bedrock client
   mid-milestone; if it updates past 2193, the official client can no longer join.
 - **Stopping the server:** stopping a background shell doesn't always kill `pumpkin.exe` on
@@ -147,19 +212,44 @@ cargo clippy -p pumpkin-core --all-targets
   networks only, or cancel; loopback works either way.
 - **Untracked on purpose:** `.idea/` (RustRover) and `.claude/settings.local.json`.
 
-## Notes for M2 (found while planning M1)
+## Notes for M3 (found in M2)
 
-All of these are handled in `docs/milestones/m2-plan.md`; they stay here for the record.
+- **Chunk layout:** `CLevelChunk::encode_chunk` (`net/bedrock/level_chunk.rs:68`) writes the
+  layout M3 decodes, summarised in recon §8. M2 only counts `LevelChunk` packets.
+- **Where the decoder lives:** if it needs Pumpkin types that only Pumpkin's own module can
+  build, follow the `client_codecs` pattern. Otherwise the client crate is fine.
+- **Finish the measurement:** time chunk *decode* per chunk. Then design the `Arc` special case
+  that PLAN.md now calls for (a seam in `send_chunks`).
+- **Encode is slow:** about 850 µs per 22 KB chunk in release. Profiling `convert_be_network` is
+  a possible upstream improvement.
+- **Spawn and chunks race:** `PlayStatus::PlayerSpawn` can arrive before any `LevelChunk`.
+  Don't treat "spawned" as "chunks loaded".
+- **Batches:** each one holds exactly one packet; the outgoing task sends packets one by one.
+- **Packet names:** the name table lists every clientbound packet. Unknown ids log as
+  `Unknown(n)`, so a new one shows up in the debug log.
 
-- **Logger:** Pumpkin's `init_logger` calls `.init()`, which panics if a global `tracing`
-  subscriber already exists. The embedded server must not call it; the client owns logging.
-- **Startup and shutdown hang:** `PumpkinServer::start` blocks on `LOGGER_IMPL.wait()`
-  (`pumpkin-core/src/lib.rs:461` when `commands.use_console` is set, and **unconditionally at
-  `:549`**; line numbers as of fork `80b19bb`). Before `start()`, call `pumpkin_core::LOGGER_IMPL.set(None)` and set
-  `commands.use_console = false`. No fork change is needed.
-- **Process setup:** `crates/pumpkin/src/main.rs` installs the `ring` rustls provider and builds a
-  named Rayon pool before anything else. The embedded client must do the same.
-- **`accept_bedrock` helper:** moving the NetherNet accept-branch body in `lib.rs` into an
-  `accept_bedrock(transport, addr)` helper happens in M2, together with the `LocalChannel` branch
-  that calls it.
-- **Host login:** choose between unsigned tokens and a local login seam (recon §6).
+## Notes for M5 (found in M2)
+
+- **One server per process:** `SHOULD_STOP` and `STOP_INTERRUPT` are process globals, never
+  reset. Switching worlds from a world list needs a process restart, or an upstream reset.
+- **Host identity:** replace `login::DEV_XID` with a per-install identity saved with the
+  settings. The player's UUID comes from the `xid`, so dev-world player data (inventory,
+  position) won't carry over when it changes.
+- **Permission level:** Pumpkin's Bedrock `StartGame` hard-codes 2 with a TODO. It's still an
+  open question in PLAN.md.
+- **Block actions:** the `PlayerAuthInput` writer refuses item, stack-request and block actions.
+  Add those writers with block break and place.
+- **Resource pack names:** only the HAVE_ALL_PACKS and COMPLETED status names are known (from
+  the capture). Capture the others before sending them.
+- **ECS:** pick `bevy_ecs` or `hecs` (PLAN.md open question).
+
+## Upstream PR candidates
+
+- **A base-dir parameter for Pumpkin**, so the embedding client needn't change the process's
+  working directory (`main.rs`'s `enter_data_dir`). Pumpkin resolves the world, `ops.json`,
+  bans, whitelist and user cache from the working directory.
+- **The `client` codec feature in `pumpkin-protocol`**, with its golden fixtures.
+- **Compression ignores its threshold:** every packet is deflated, even tiny ones (recon §5).
+- **Chunk encode speed** (see Notes for M3).
+
+Notes for M2 (found while planning M1) were all handled; see `docs/milestones/m2-plan.md`.

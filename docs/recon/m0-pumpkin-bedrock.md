@@ -134,7 +134,11 @@ These rules apply with `online_mode = false`; online mode verifies the tokens on
 ```
 
 - `AuthenticationType` must deserialize as 0 (Full), 1 (Guest) or 2 (SelfSigned). In offline
-  mode it isn't checked beyond that.
+  mode it isn't checked beyond that. The official 1.26.52 client sends 0 (M2 capture).
+- **`SelfSigned` is a third login path** (found in M2; `login/login.rs:42`). In online mode it
+  verifies the token against the token's own key, but only when
+  `bedrock.authentication.enabled = false`. That setting turns Xbox verification off for every
+  player, so it protects LAN guests no better than accepting unsigned tokens.
 - The `Token` payload is base64url-decoded **without checking the signature**
   (`login/login.rs:61` → `crates/pumpkin-auth/src/jwt/mod.rs:477`). The claims read are:
 
@@ -169,7 +173,9 @@ locale.
    (`resource_pack_response.rs:55-61`), which sends `StartGame`, then chunks.
 3. `RequestChunkRadius` and `SetLocalPlayerAsInitialized`, which are normal play packets.
 
-**Options for the host's login (decide in M2):**
+**Options for the host's login.** M2 chose (a): the host sends unsigned tokens with a placeholder
+`cpk` and a fixed dev `xid`, with no fork change. M7 adds a trusted-local seam so guests can be
+verified while the host isn't. See `docs/milestones/m2-plan.md`.
 
 - **(a) The client builds unsigned tokens.** It generates a P-384 key pair at startup, puts the
   public key in `cpk`, and fills `xname`/`xid` and the 10 `ClientData` fields.

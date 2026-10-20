@@ -1,7 +1,8 @@
 # Milestone 2 plan: Headless embedded client
 
-**Status:** approved by the owner on 2026-10-20. **Not started;** Step 1 is next. The owner
-asked for four changes at approval, all folded in below:
+**Status:** approved by the owner on 2026-10-20. **Done on 2026-10-20:** every acceptance check
+passed. "Results" at the end has the numbers. The owner asked for four changes at approval, all
+folded in below:
 - the fixed dev `xid` until M5, with a STATUS.md note on player data;
 - absolute paths before the chdir, and the base-dir upstream candidate;
 - the capture hook reverted with `git checkout`;
@@ -464,3 +465,189 @@ Numbers come from builds with the STATUS.md release env vars. Debug numbers are 
 - **Pushes:** ask before any push.
 
 ## Deviations (filled in during execution)
+
+1. **The capture hook kept up to 1,200 `PlayerAuthInput` files, not 200.** The client sends one
+   every tick (20 Hz), so 200 is only 10 s: too short to stand, walk and jump. The session
+   produced 278. The other ids kept the cap of 200.
+2. **`LocalChannel::send` also races the cancellation token.** The plan only said `recv` does.
+   When the client's queue is full, `send` waits, and without the race `close()` couldn't wake
+   it either. A test covers it. There are three more tests than planned: the listener and
+   connector, the client seeing a server close after draining, and the send wake-up.
+3. **The NBT reader needed a small adapter.** `pumpkin-nbt`'s stream adapter requires
+   `Read + Seek`, but `PacketRead` only gets `Read`. `client_codecs/nbt.rs` has a `ReadSource`
+   that implements `NbtDataSource` over any `Read`. Seeking is only used to skip forward, so it
+   reads and discards.
+4. **The resource pack writer only knows two status names.** The fixtures show the names for
+   HAVE_ALL_PACKS and COMPLETED. REFUSED and SEND_PACKS return `Unsupported` until their names
+   are captured, so the `pack_ids` branch isn't mirrored yet.
+5. **Every golden test is byte-exact.** The decoded-field fallback wasn't needed, because the
+   official client writes `PlayerAuthInput` flags in ascending order.
+6. **An extra fork file: `client_codecs/fixtures/.gitattributes`** (`*.bin binary`). The repo
+   uses `core.autocrlf=true`, and some fixtures contain no NUL byte, so git could have treated
+   them as text and rewritten line endings on another checkout.
+7. **`pumpkin-core` was also linted with `--features pumpkin-protocol/client`.** That's the
+   feature-unified build the client produces, and it's clean.
+8. **The name table has three serverbound types as well.** Pumpkin sends its serverbound
+   `SText` (id 9), `SRespawn` and `SContainerClose` structs to clients too, since those packets
+   go both ways. The first session logged `Unknown(9)` for a chat line, which is how this
+   surfaced.
+9. **No runtime `Handle` in `EmbeddedServer`.** Nothing needed it. The loaded chunks are a
+   public `DashMap` (`world.level.loaded_chunks`) and `CLevelChunk::encode_chunk` is
+   synchronous, so Step 9 times it on the main thread. The handle was removed rather than kept
+   as dead code; a later milestone can add it back if it needs to run futures on the server.
+10. **The movement check polls instead of checking once.** After the walk it re-reads the
+   server's position each tick for up to 5 s, so a slow debug server can't fail it by timing.
+   It passes as soon as the threshold is met: dev runs read 7.80 of the 8.0 blocks, with the
+   last tick's input still in flight.
+11. **`--measure` waits for the join to finish.** It keeps playing until no `LevelChunk` has
+   arrived for 2 s (60 s at most). The chunk share of *encode time* needs a cost for the
+   non-chunk packets, which M2 doesn't instrument in the fork. It's estimated from Pumpkin's
+   own writer throughput on the decoded `StartGame`, applied to the non-chunk bytes, and
+   labelled as an estimate.
+13. **An NBT round trip can't be byte-exact.** `NbtCompound` keeps its tags in a `HashMap`
+   (`pumpkin-nbt/src/compound.rs:40`), whose iteration order differs between instances. Even
+   Pumpkin's own writer orders the tags of two equal compounds differently. The Step 4 NBT
+   test compared bytes and passed by luck; the Step 10 re-run failed it in 4 of 6 runs, e.g.
+   `[count, name, flag]` against `[flag, count, name]`. It now compares the decoded compound
+   and the encoded length (fork `03b498c47`, bump `7d372f3`). The `StartGame` round trip stays
+   byte-exact because its compound has one tag.
+14. **Small fixed values the plan left open:** `DEV_XID` is `"1000000000000001"`, which can't
+   be a real XUID. `DeviceId` is `"limonite-dev"`, `ServerAddress` is `"limonite-local"`
+   (Pumpkin never reads it), and `ClientRandomId` is 1. `RequestChunkRadius` sends 8 for both
+   the radius and the max.
+15. **Block actors are timed separately.** The first release run timed
+   `World::bedrock_chunk_block_actors` together with the encode, though the plan names only
+   `encode_chunk` plus the wrapper. They're now separate (`d4f045d`). Block actors cost about
+   1 µs per chunk, so the totals barely move.
+16. **Two more names in the table.** The release run logged `Unknown(27)`, so a wider search
+   found two more serverbound structs that Pumpkin also sends: `SActorEvent` and `SAnimate`
+   (`3d31577`). `SPlayerAction` is built in `pumpkin-core` too, but only to reuse a handler.
+17. **No "Optimise dependencies in dev builds" commit.** The dev build was never too slow to
+   show. On a freshly created world, `StartGame` arrived 1.85 s after `COMPLETED`, well inside
+   the 10 s timeout. A dev acceptance run takes about 5 s plus the linger.
+
+## Results
+
+**Step 1 capture** (2026-10-20, 15:46, fork `80b19bb` plus the hook; reverted with
+`git checkout`, and the stock server rebuilt). One join: 1 `SLogin`, 2
+`SResourcePackClientResponse`, 1 `SRequestChunkRadius`, 1 `SSetLocalPlayerAsInitialized` and
+278 `SPlayerAuthInput`. Raw captures are in `run/captures/m2-official/` (gitignored).
+
+- **Resource pack responses:** `VarUInt(status - 1)` then a status-name string, and nothing
+  after it: `downloadingfinished` (HAVE_ALL_PACKS) and `resourcepackstackfinished` (COMPLETED).
+- **`PlayerAuthInput`:** Pumpkin's reader layout matches. The flags are a `VarUInt` count, then
+  zigzag `VarInt` flag numbers in **ascending order** in every packet, so a byte-exact re-encode
+  is possible. The five optionals are all `false`. `camera_orientation` is a unit vector, which
+  confirms the field alignment.
+- **Fixtures chosen:** idle `144-0050` (flags 48, 50); walking `144-0080` (`move_vec` 0, 1; flags
+  10, 48, 50); jumping `144-0130` (flags 3, 6, 16, 31, 48, 60, 61).
+- **`SLogin` (non-identifying facts only):**
+  - 54,468 bytes; protocol 2193 (big-endian). The connection-request `VarUInt` equals exactly
+    `4 + jwt + 4 + raw_token`.
+  - `jwt`: compact JSON `{"AuthenticationType":0,"Token":"…"}`, so **Full (0)**.
+  - The token is an RS256 JWT with `kid`. Claims: `sub`, `ipt`, `iat`, `mid`, `tid`, `pfcd`,
+    `cpk`, `ap`, `xid`, `xname`, `exp`, `iss`, `aud`.
+  - `raw_token`: an ES384 JWT with `x5u`, carrying 46 `ClientData` keys. The keys Pumpkin
+    doesn't model include `FilterProfanity` and `ProfileHash`. There's no `PlayFabId`,
+    `PlatformUserId` or `ThirdPartyNameOnly`.
+  - Required values copied into our token: `DeviceOS` 8, `CurrentInputMode` 1,
+    `DefaultInputMode` 1, `UIProfile` 0, `GameVersion` "1.26.52", `LanguageCode` "en_US",
+    `MaxViewDistance` 96. The real client's `ServerAddress` was `http://127.0.0.1:19132:19132`.
+
+**Fork lints and tests** (fork `03b498c`): clippy is clean on `pumpkin-core` (plain and
+`--features java-listener`), on `pumpkin-protocol` (plain and `--features client`), and on
+`pumpkin-core` with `--features pumpkin-protocol/client`.
+- `net::bedrock`: 41/41 pass (34 before, plus 7 `LocalChannel` tests).
+- `pumpkin-protocol --features client`: 138 pass, plus 1 ignored.
+- The ignored `SLogin` golden test passes locally against the 54,468-byte capture.
+- Client: 8/8 pass.
+
+**Acceptance run** (2026-10-20, 16:48; dev build;
+`RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --linger 30`; exit code 0):
+
+```
+INFO  Embedded server started
+INFO  Logging in as Limonite
+DEBUG <- CPlayStatus / CResourcePacksInfo / CResourcePackStackPacket / ... / CStartGame
+INFO  StartGame: runtime id 1, seed 1794154124062040974, world spawn (-588, 200, 88), player eyes at (-571.70, 64.62, 88.50)
+INFO  Chunk radius is 8
+INFO  Spawned (0 LevelChunk packets so far)
+INFO  Walking east for 40 ticks
+INFO  Lingering for 30 s; process id 40204
+INFO  PASS spawn: PlayerSpawn received; SetLocalPlayerAsInitialized sent
+INFO  PASS movement: the server's player moved 7.80 blocks east (needs 4); feet y 63.00 -> 63.00
+INFO  PASS chunks: 329 LevelChunk packets received (needs more than 4)
+INFO  Completed save!
+INFO  Embedded server stopped
+```
+
+- **No sockets:** during the linger, 11 s in, `Get-NetTCPConnection -OwningProcess 40204` and
+  `Get-NetUDPEndpoint -OwningProcess 40204` both returned nothing. The startup log has no
+  "listening", "bind" or "Failed to fetch" lines.
+- **Control:** the same two cmdlets against the stock `pumpkin.exe` (pid 11084) listed TCP
+  `0.0.0.0:19132` listening and UDP `7551`, `19132`, `[::]:19133` and a loopback ephemeral port.
+- `PlayerSpawn` can arrive before any `LevelChunk`. The server sends it once more than 4 chunks
+  are *on their way* (`entity/player.rs:2881`).
+- The player's position persists across runs, because the world saves it per UUID, which comes
+  from the dev `xid`. Each run starts where the last walk ended.
+
+**NetherNet regression** (2026-10-20, 17:01). The stock server was rebuilt at fork `03b498c`
+(4 m 25 s) and run from `run/pumpkin/`. Bedrock 1.26.52 joined over the moved `accept_bedrock`
+path and walked. Log, with the gamertag redacted:
+
+```
+17:01:04 DEBUG Accepted Bedrock NetherNet connection from 127.0.0.1:52088
+17:01:04 DEBUG Bedrock: SResourcePackResponse::STATUS_HAVE_ALL_PACKS
+17:01:05 DEBUG Bedrock: SResourcePackResponse::STATUS_COMPLETED
+17:01:05  INFO <gamertag> joined the game
+17:01:05 DEBUG Player <gamertag> updated their render distance: 8 -> 16.
+17:01:08 DEBUG Player <gamertag> initialized (Runtime ID: 1)
+17:01:30  INFO <gamertag> left the game
+```
+
+The server was then stopped, and `Get-Process pumpkin` returned nothing.
+
+**Measurements** (2026-10-20, 17:14 local, release build with
+`CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`;
+`cargo run --release -p limonite-client -- --measure`). One join at chunk radius 8 into an
+existing world, until no chunk had arrived for 2 s:
+
+| Packet | Count | Body bytes | Decode µs/packet |
+| --- | ---: | ---: | ---: |
+| `CLevelChunk` | 329 | 7,230,561 | |
+| `CCraftingData` | 1 | 513,444 | |
+| `CBiomeDefinitionList` | 1 | 342,923 | |
+| `CItemRegistry` | 1 | 113,448 | |
+| `CMoveActorDelta` | 3,884 | 67,197 | |
+| `CAvailableCommands` | 1 | 57,222 | |
+| `CCreativeContent` | 1 | 43,773 | |
+| `CSetActorMotion` | 1,023 | 14,480 | |
+| `CAddActor` | 124 | 11,381 | |
+| 18 other types | 189 | 5,463 | |
+| `CStartGame` | (in "other") | 237 | 40.7 |
+| `CPlayStatus` | (in "other") | 8 | 0.3 |
+| `CChunkRadiusUpdated` | (in "other") | 1 | 0.2 |
+
+- **Totals:** 5,559 packets in 5,559 batches (one packet per batch), 8,411,081 batch bytes.
+- **Client framing:** 3.8 ms in total, 0.69 µs per batch.
+- **Server chunk encode** (`encode_chunk` plus the batch wrapper, 462 loaded chunks × 10 passes,
+  on the main thread): **847 µs and 22,209 bytes per chunk**. Gathering block actors first adds
+  0.9 µs. A first run, which timed them together, gave 814 µs, so treat about ±5% as noise.
+- **Copies:** the outgoing task copies each batch once, about 8.4 MB per join. At memory
+  bandwidth that's around a millisecond.
+- **Not measured in M2:** chunk *decode*, which arrives with M3's decoder, and channel latency.
+
+**`Arc` decision** (PLAN.md's "special-case chunks with `Arc`"):
+- **Chunks dominate:** 86.1% of the bytes received, and about 99.8% of encode time. The
+  non-chunk encode is estimated at about 0.46 ms for 1.17 MB, at Pumpkin's measured
+  2,535 bytes/µs on `StartGame`.
+- **A join's encode is far more than "noticeable":** 329 × 847 µs = 279 ms, 5.6 × the 50 ms
+  tick. It runs on Rayon, not the tick thread, so it doesn't stall ticks directly. It's still
+  CPU the host's renderer will want from M4 on.
+- **Recommendation: yes, special-case the host's chunks with `Arc`.** It's scheduled after M3,
+  whose decoder measures the other half of the saving. Skipping the encode alone saves about
+  0.85 ms of CPU per chunk.
+- **What it costs:** a new seam in `send_chunks` (`net/bedrock/mod.rs`) that hands
+  `Arc<ChunkData>` to a local transport instead of encoding it. Recorded in PLAN.md.
+- **Separately:** 847 µs to encode 22 KB is slow for what is mostly palette packing. It's worth
+  profiling `convert_be_network` in M3 as an upstream candidate.

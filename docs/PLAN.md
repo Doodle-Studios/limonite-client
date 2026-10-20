@@ -52,14 +52,18 @@ The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pu
 
 - Adds a `Transport` trait: the one seam where a player's packets enter and leave the server.
   - It replaces the `BedrockClient::session: Arc<NetherNetSession>` field, keeping its six method names (`send`, `recv`, `flush_reliable`, `close`, `is_closed`, `client_public_key`) so call sites don't change.
-  - The NetherNet branch of the accept loop becomes an `accept_bedrock(transport, addr)` helper that local connections reuse. This lands in M2 with `LocalChannel`, its second caller; M1 left the accept loop unchanged.
+  - The NetherNet branch of the accept loop is an `accept_bedrock` helper (M2) that local connections reuse. Besides the transport and address, it takes the accept loop's shared state: the client-id counter, the task tracker and the client table.
+- Adds `LocalChannel` (`net/bedrock/local.rs`, M2): an in-memory `Transport` for the host, over two bounded tokio channels, plus an always-present `local_listener` on `PumpkinServer`. It binds nothing.
 - Puts the Java Edition listener behind an opt-in `java-listener` cargo feature in `pumpkin-core`, so it compiles out rather than being deleted. That covers the TCP bind, query and LAN broadcast. The stock `pumpkin` binary turns the feature on by default; Limonite's client never does. Java protocol types stay compiled, because they're used in 93 files of `pumpkin-core`.
 - Adds a control API exposed only to the client binary: open/close LAN, pause, save, shut down. External players can never reach it.
 - Lets local players skip session setup without moving code:
   - Encryption is DTLS inside NetherNet, so `LocalChannel` never does it.
   - Compression only turns on when the client sends `RequestNetworkSettings`, and the host never sends it.
-  - The host logs in through a local path, decided in M2.
-- Adds client-side packet codecs behind a `client` feature in `pumpkin-protocol`. Clientbound packets only derive `PacketWrite` and most serverbound ones only `PacketRead`; the client needs the opposite. This is the one change to existing files that isn't a seam: it's mechanical (one derive per packet file), and a good upstream candidate.
+  - The host logs in with an unsigned token over `LocalChannel` (M2), with no fork change. The embedded server stays offline while LAN is closed; M7 adds a trusted-local seam so LAN guests can still be Xbox-verified.
+- Adds client-side packet codecs behind a `client` feature in `pumpkin-protocol`. Clientbound packets only derive `PacketWrite` and most serverbound ones only `PacketRead`; the client needs the opposite. This is the one change to existing files that isn't a seam, and a good upstream candidate.
+  - It isn't one derive per packet file (M2 finding). Plain structs get a `cfg_attr` derive next to their definition. Types whose codec is hand-written get a hand-written mirror in the new `bedrock/client_codecs` module.
+  - Each milestone adds the codecs it uses; M2 has the 5 packets the host sends and the 4 it decodes.
+  - Sent packets are tested against bytes the official client sent (`client_codecs/fixtures/`), and must re-encode byte for byte. Read packets round-trip through Pumpkin's writer.
 
 **What the fork keeps untouched**: world generation, physics, mob AI, ticking, chunk storage, saving, commands.
 
@@ -67,11 +71,17 @@ The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pu
 
 | Transport | When active | Carries | Notes |
 | --- | --- | --- | --- |
-| `LocalChannel` | Always, for the host | Uncompressed Bedrock batch bytes via `tokio::sync::mpsc` | No WebRTC, DTLS, fragmentation, compression or auth. One in-process encode/decode remains; measure it in M2 |
+| `LocalChannel` | Always, for the host | Uncompressed Bedrock batch bytes via `tokio::sync::mpsc` | No WebRTC, DTLS, fragmentation, compression or auth. One in-process encode/decode remains; M2 measured it (see below) |
 | `NetherNet` | Only while LAN is open | Compressed batches over WebRTC data channels (DTLS-encrypted, ≤10 kB fragments) | Upstream's existing transport. Listener, status responder and LAN discovery are started and stopped by the control API |
 | `P2P` | Later | NetherNet with our own signalling | ICE/STUN already exist in NetherNet; needs a signalling server and TURN fallback |
 
 **Why bytes, not structs, on `LocalChannel`.** Pumpkin turns each packet into bytes in game code, before the transport ever sees it (`BedrockClient::serialize_packet`, called from 54 `ClientPlatform::Bedrock` sites across 13 files). Passing structs would mean rewriting all of those call sites, which breaks the small-diff rule. Bytes still skip everything expensive. If M2's measurements show chunk packets dominate, special-case them with `Arc` then.
+
+**M2 measured it, and chunks dominate: special-case them with `Arc` after M3.** Results are in `docs/milestones/m2-plan.md`.
+- **Bytes:** in a join at radius 8, chunks were 86% of the bytes received: 329 chunks, 7.2 of 8.4 MB.
+- **Encode cost:** each chunk costs the server about 850 µs to encode (release build), so a join's chunk encode is about 280 ms of CPU, 5.6 ticks' worth. Everything else costs well under a millisecond. Framing is 0.7 µs per batch, and copies are negligible.
+- **What `Arc` saves:** passing the host's chunks as `Arc<ChunkData>` skips that encode and the client's decode.
+- **Cost and timing:** it needs one new seam in `send_chunks`. It lands after M3, whose decoder measures the decode half of the saving.
 
 **Packet types are shared.** The client uses Pumpkin's own Bedrock packet definitions, not a separate protocol crate. One definition on both sides of the channel means the client and server can never disagree on a protocol version. This replaces the earlier idea of using bedrock-rs. The structs need codecs in both directions first (see "What the fork changes").
 
@@ -122,7 +132,7 @@ loop {
 
 - Chunks in a map keyed by chunk coordinates, stored as 16×16×16 sub-chunks with palette compression (bits per block = ceil(log2(palette size))).
 - Chunk data shared as `Arc` so the channel and the mesher read the same allocation.
-- Entities in an ECS (`bevy_ecs` or `hecs`, standalone). Pick one in milestone 2 and stick with it.
+- Entities in an ECS (`bevy_ecs` or `hecs`, standalone). Pick one in milestone 5 and stick with it: M2 stores no entities, and interpolation in M5 is the first user.
 
 **Latency: what's fixed by what**
 
@@ -273,10 +283,16 @@ Each milestone ends in something runnable and is done only when its acceptance c
    - When `pumpkin/` becomes a submodule, remove the `/pumpkin/` line from `.gitignore`; otherwise git ignores the submodule path.
    - Accept: official Bedrock client still joins the fork over NetherNet; fork diff is small and confined to the seam; the Java listener compiles out.
    - **Done 2026-10-19.** Bedrock 1.26.52 joined the fork at `80b19bb` over NetherNet. The fork diff is five files (+81/−4). Java listener is compiled out: no TCP socket can be bound without the `java-listener` feature. A `--no-default-features` server with `networking.java.enabled = true` had no TCP 25565 listener. Plan and deviations: `docs/milestones/m1-plan.md`.
-2. **Headless embedded client.** Client binary starts Pumpkin on a background tokio thread, connects through `LocalChannel`, logs every packet name it receives, then sends movement.
+2. ✅ **Headless embedded client.** Client binary starts Pumpkin on a background tokio thread, connects through `LocalChannel`, logs every packet name it receives, then sends movement.
    - Decide the host's login path (unsigned tokens vs a local login seam; recon §6) and add the client-side packet codecs.
    - Measure `LocalChannel`'s encode/decode cost.
    - Accept: spawn completes, chunks arrive, the server sees the player move, with no socket opened.
+   - **Done 2026-10-20** with the fork at `03b498c`.
+     - The client starts Pumpkin on a `Pumpkin-Main` thread and logs in as the host with unsigned tokens over `LocalChannel`. It spawns, receives 329 chunks and walks 8 blocks east.
+     - The server's own player moved 7.8 blocks. While in-world the process owned no TCP or UDP socket, and the startup log has no listening or fetch lines.
+     - Bedrock 1.26.52 still joins over NetherNet after the `accept_bedrock` move.
+     - Sent packets re-encode byte for byte against official-client captures.
+     - Measurements and the `Arc` decision are under "Why bytes, not structs". Plan, results and deviations: `docs/milestones/m2-plan.md`.
 3. **Chunk map.** Decode sub-chunks and palettes into world state; dump a top-down map image of loaded chunks.
    - Accept: map image matches what the official client sees at the same seed and position.
 4. **First pixels.** `winit` window, `wgpu` device, CPU meshing of one chunk, fly camera.
@@ -286,6 +302,8 @@ Each milestone ends in something runnable and is done only when its acceptance c
 6. **GPU-driven renderer.** Compute meshing, GPU culling, indirect draws, capability tiers, benchmark + warnings.
    - Accept: measurable frame-time improvement over milestone 4 at the same render distance; tier chosen from features, not vendor.
 7. **Open to LAN.** Control API starts and stops the NetherNet listener, status responder and LAN discovery live; the host's packets stay uncompressed; optionally cache one encoding across remote recipients, if measurements justify it.
+   - Turn online mode on when LAN opens, so guests are Xbox-verified. Add a small trusted-local seam (something like `Transport::is_trusted_local()` plus one condition in `login/login.rs`) so the host's unsigned token is still accepted.
+   - Fetch the Xbox OIDC keys lazily when LAN opens. `Server::new` fetches them at startup whenever online mode and authentication are on (`server/mod.rs:354`); with LAN closed, the embedded server must open no socket.
    - Accept: a second device joins mid-session; host frame times unchanged with LAN closed and within noise with one guest.
 8. **Resource packs.** Full VFS stacking and merge rules, flipbooks, Molang crate, entity models and animations, sounds, hot reload.
    - Accept: a popular third-party Bedrock pack renders blocks, items and mobs correctly; Molang suite passes on vanilla expressions.
@@ -320,7 +338,8 @@ The biggest risk is upstream Pumpkin's Bedrock support being incomplete; the big
 - [ ] Which ECS: `bevy_ecs` or `hecs`?
 - [ ] Which 2–3 Iris packs form the test suite?
 - [ ] Exact form of the control API: function calls on a handle, or a dedicated control channel?
-- [ ] How does the host's identity and permission level work when there's no login on `LocalChannel`? (M0 mapped what login requires and two options, in recon §6; decide in M2.)
+- [x] How does the host's identity work when there's no Xbox login on `LocalChannel`? **The host sends an unsigned token: a fixed dev identity now, a per-install one saved with the settings in M5** (M2; recon §6).
+- [ ] What permission level does the host get? Pumpkin's Bedrock `StartGame` hard-codes 2 with a TODO. Decide in M5.
 - [ ] How does the embedded server get Mojang's vanilla datapack without the binary bundling it? (Found in M0; see the Risks table. Must be settled before any release.)
 - [x] Which Bedrock protocol version is upstream Pumpkin targeting right now? **1.26.51, protocol 2193, exact match only** (fork commit `aac0a82`, M0).
 
