@@ -19,6 +19,15 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
     "fmt",
     "ansi",
 ] }
+# The embedded server's async runtime.
+tokio = { version = "1.53", default-features = false, features = ["rt-multi-thread"] }
+# Pumpkin's worldgen and chunk encoding run on the global Rayon pool, which we name.
+rayon = { version = "1.12", default-features = false }
+# Pumpkin's HTTP client is built without a crypto provider; the process installs `ring`.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+bytes = { version = "1.12", default-features = false, features = ["std"] }
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
 # Profiles below mirror pumpkin/Cargo.toml. Cargo only reads profiles from the root manifest, so
 # without these the fork would build with different settings here than in pumpkin/.
