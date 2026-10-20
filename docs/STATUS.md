@@ -11,16 +11,19 @@ _Last updated: 2026-10-20._
 - **Current milestone:** 3, the chunk map. **Not planned yet.** Start it in plan mode; read
   "Notes for M3" below first.
 - **Milestone 2 is done (2026-10-20).** Plan, results and deviations: `docs/milestones/m2-plan.md`.
-- **Pushed:** the fork's `limonite` branch, at `03b498c`, on 2026-10-20, with the owner's OK.
-  That covers the M1 and M2 fork commits. It tracks `origin/limonite`.
-- **Not pushed:** superproject `main`, which has no remote yet. Ask the owner before pushing
-  anything.
+- **Pushed, both public, on 2026-10-20 with the owner's OK:**
+  - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
+    tracks `origin/main`);
+  - the fork's `limonite` branch, at `03b498c`, with the M1 and M2 fork commits. It tracks
+    `origin/limonite`.
+
+  Ask the owner before pushing anything.
 - **Fork location:** the owner moved the fork to `Doodle-Studios/Pumpkin`. `.gitmodules` and
   `origin` point there. The old `LaDoodleInTheHat/Pumpkin` URL redirects, but don't use it.
 
 ## Done
 
-| Milestone | Result | Commits (`main` not pushed; fork `limonite` pushed) |
+| Milestone | Result | Commits (all pushed) |
 | --- | --- | --- |
 | 0. Recon | Official Bedrock 1.26.52 joined stock Pumpkin (fork at `aac0a82`) over NetherNet; note in `docs/recon/m0-pumpkin-bedrock.md`; PLAN.md corrected | `main`: `54a51e6` scaffold, `341cdfb` recon note, `1f86cbe` PLAN.md corrections |
 | 1. Workspace + fork seam | Cargo workspace with `client/`; fork as a submodule; `Transport` trait with NetherNet behind it; Java listener behind `java-listener`; `tracing` in the client. Bedrock 1.26.52 joined a `--no-default-features` server at `80b19bb` with `java.enabled = true` and no TCP 25565 listener | `main`: `75ae93d` plan, `c27b3e4` workspace, `8b083d9` submodule, `7ed6d8e` tracing, `7ff616c` profile cleanup, `f8971b4` bump. Fork `limonite`: `df1f8e524` Transport, `80b19bb9b` java-listener |
@@ -78,9 +81,9 @@ Windows 11, with Git Bash and PowerShell both used.
   is `.git/modules/pumpkin`.
 - `upstream` points at `https://github.com/Pumpkin-MC/Pumpkin.git`, whose default branch is
   `master`.
-- **Fresh clone** (the superproject has no remote yet): after cloning it, set long paths before
-  the submodule checks out. Run `git -c core.longpaths=true submodule update --init`, then
-  `git -C pumpkin config core.longpaths true`.
+- **Fresh clone:** clone `https://github.com/Doodle-Studios/limonite-client`, then set long
+  paths before the submodule checks out. Run `git -c core.longpaths=true submodule update
+  --init`, then `git -C pumpkin config core.longpaths true`.
 
 **Build and run the client** (run at the repo root):
 

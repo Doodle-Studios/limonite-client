@@ -10,8 +10,9 @@ starting any task, and treat it as the source of truth for architecture decision
   step lands.
 - **Milestones 0, 1 and 2 are done** (M2 on 2026-10-20). **Milestone 3, the chunk map, is
   next and not planned.** Start it in plan mode; STATUS.md has "Notes for M3".
-  - The fork's `limonite` branch is pushed (at `03b498c`, with M2). The superproject has no
-    remote. Ask the owner before pushing anything.
+  - Both repos are public and pushed. The superproject is `Doodle-Studios/limonite-client`
+    (`main`), and the fork is `Doodle-Studios/Pumpkin` (`limonite`, at `03b498c`). Ask the owner
+    before pushing anything.
 - **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`, and the "Deviations"
   sections of `docs/milestones/m1-plan.md` and `docs/milestones/m2-plan.md`.
 
