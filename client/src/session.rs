@@ -37,7 +37,7 @@ use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 use tracing::{debug, info, warn};
 
-use crate::{login, packets};
+use crate::{login, measure::Stats, packets};
 
 /// One client tick, as in vanilla.
 pub const TICK: Duration = Duration::from_millis(50);
@@ -106,6 +106,9 @@ pub struct Session {
     /// Ticks of walking still to do.
     walk_ticks: u32,
     level_chunks: u32,
+    stats: Stats,
+    /// The decoded `StartGame`, kept as an encode-speed yardstick.
+    start_game: Option<CStartGame>,
 }
 
 impl Session {
@@ -123,6 +126,8 @@ impl Session {
             input_tick: 0,
             walk_ticks: 0,
             level_chunks: 0,
+            stats: Stats::default(),
+            start_game: None,
         };
         // No `RequestNetworkSettings` first: compression then never turns on,
         // and every batch stays plain bytes (recon §5).
@@ -141,6 +146,14 @@ impl Session {
 
     pub const fn level_chunks(&self) -> u32 {
         self.level_chunks
+    }
+
+    pub const fn stats(&self) -> &Stats {
+        &self.stats
+    }
+
+    pub const fn start_game(&self) -> Option<&CStartGame> {
+        self.start_game.as_ref()
     }
 
     /// Walks east (+X) for `ticks` ticks, starting next tick.
@@ -211,9 +224,14 @@ impl Session {
     }
 
     fn handle_batch(&mut self, batch: Bytes) {
-        match packets::split_batch(batch) {
+        let len = batch.len();
+        let start = Instant::now();
+        let split = packets::split_batch(batch);
+        self.stats.record_batch(len, start.elapsed());
+        match split {
             Ok(packets) => {
                 for packet in packets {
+                    self.stats.record_packet(packet.id, packet.payload.len());
                     self.handle_packet(&packet);
                 }
             }
@@ -223,9 +241,8 @@ impl Session {
 
     fn handle_packet(&mut self, packet: &RawPacket) {
         debug!("<- {}", packets::PacketName(packet.id));
-        let mut body = packet.payload.as_ref();
         match packet.id {
-            CPlayStatus::PACKET_ID => match CPlayStatus::read(&mut body) {
+            CPlayStatus::PACKET_ID => match self.decode::<CPlayStatus>(packet) {
                 Ok(CPlayStatus::LoginSuccess) => info!("Login accepted"),
                 Ok(CPlayStatus::PlayerSpawn) => self.on_player_spawn(),
                 Ok(status) => warn!("PlayStatus {}", status as i32),
@@ -239,17 +256,17 @@ impl Session {
                 self.send_pack_response(SResourcePackClientResponse::STATUS_COMPLETED);
                 self.stage = Stage::StartingGame;
             }
-            CStartGame::PACKET_ID => match CStartGame::read(&mut body) {
-                Ok(start_game) => self.on_start_game(&start_game),
+            CStartGame::PACKET_ID => match self.decode::<CStartGame>(packet) {
+                Ok(start_game) => self.on_start_game(start_game),
                 Err(err) => warn!("Bad StartGame: {err}"),
             },
-            CChunkRadiusUpdated::PACKET_ID => match CChunkRadiusUpdated::read(&mut body) {
+            CChunkRadiusUpdated::PACKET_ID => match self.decode::<CChunkRadiusUpdated>(packet) {
                 Ok(update) => info!("Chunk radius is {}", update.chunk_radius.0),
                 Err(err) => warn!("Bad ChunkRadiusUpdated: {err}"),
             },
             CLevelChunk::PACKET_ID => self.level_chunks += 1,
             CDisconnect::PACKET_ID => {
-                match CDisconnect::read(&mut body) {
+                match self.decode::<CDisconnect>(packet) {
                     Ok(disconnect) => warn!(
                         "Disconnected by the server (reason {}): {}",
                         disconnect.reason.0, disconnect.message
@@ -262,7 +279,16 @@ impl Session {
         }
     }
 
-    fn on_start_game(&mut self, start_game: &CStartGame) {
+    /// Decodes `packet` as a `P`, timing it.
+    fn decode<P: PacketRead>(&mut self, packet: &RawPacket) -> std::io::Result<P> {
+        let mut body = packet.payload.as_ref();
+        let start = Instant::now();
+        let decoded = P::read(&mut body);
+        self.stats.record_decode(packet.id, start.elapsed());
+        decoded
+    }
+
+    fn on_start_game(&mut self, start_game: CStartGame) {
         let spawn = Spawn {
             runtime_id: start_game.runtime_entity_id.0,
             eye_position: start_game.position,
@@ -284,6 +310,7 @@ impl Session {
         );
         self.position = spawn.eye_position;
         self.spawn = Some(spawn);
+        self.start_game = Some(start_game);
         self.stage = Stage::Spawning;
         self.send(&SRequestChunkRadius {
             chunk_radius: VarInt(CHUNK_RADIUS),

@@ -1,6 +1,7 @@
 mod checks;
 mod embedded;
 mod login;
+mod measure;
 mod packets;
 mod session;
 
@@ -22,7 +23,7 @@ use crate::{
 };
 
 const USAGE: &str =
-    "usage: limonite-client [--data-dir <path>] [--name <name>] [--linger <seconds>]";
+    "usage: limonite-client [--data-dir <path>] [--name <name>] [--linger <seconds>] [--measure]";
 
 /// Login and spawn must finish within this.
 const SPAWN_DEADLINE: Duration = Duration::from_secs(120);
@@ -30,6 +31,10 @@ const SPAWN_DEADLINE: Duration = Duration::from_secs(120);
 const WALK_TICKS: u32 = 40;
 /// How long to wait for the server to apply the walk before checking it.
 const SETTLE: Duration = Duration::from_secs(5);
+/// With `--measure`: the join is over once no chunk has arrived for this long...
+const CHUNKS_QUIET: Duration = Duration::from_secs(2);
+/// ...or after this, whichever comes first.
+const CHUNKS_MAX_WAIT: Duration = Duration::from_secs(60);
 
 /// Command-line options. Every path is absolute by the time parsing returns.
 struct Args {
@@ -40,6 +45,8 @@ struct Args {
     /// How long to stay in the world after the checks, still sending input,
     /// so the process can be inspected from outside.
     linger: Duration,
+    /// Log what the `LocalChannel` cost (meaningful in release builds only).
+    measure: bool,
 }
 
 impl Args {
@@ -47,6 +54,7 @@ impl Args {
         let mut data_dir = PathBuf::from("run/client");
         let mut name = "Limonite".to_string();
         let mut linger = Duration::ZERO;
+        let mut measure = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--data-dir" => {
@@ -60,6 +68,7 @@ impl Args {
                         .map_err(|_| format!("--linger: `{secs}` isn't a number of seconds"))?;
                     linger = Duration::from_secs(secs);
                 }
+                "--measure" => measure = true,
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
@@ -71,6 +80,7 @@ impl Args {
             data_dir,
             name,
             linger,
+            measure,
         })
     }
 }
@@ -148,6 +158,10 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
     match (spawned, session.spawn()) {
         (Ok(()), Some(spawn)) => {
             checks.push(walk_and_check(&mut session, server, &spawn));
+            if args.measure {
+                wait_for_chunks(&mut session);
+                log_measurements(&session, server);
+            }
             linger(&mut session, args.linger);
         }
         _ => checks.push(Check::new(
@@ -191,6 +205,37 @@ fn walk_and_check(session: &mut Session, server: &EmbeddedServer, spawn: &sessio
         checks::movement(&server.server, spawn).passed()
     });
     checks::movement(&server.server, spawn)
+}
+
+/// Keeps playing until the join's chunks stop arriving, so the measurements
+/// cover a whole join.
+fn wait_for_chunks(session: &mut Session) {
+    let mut seen = session.level_chunks();
+    let mut last_new = Instant::now();
+    let _ = session.run_until(Instant::now() + CHUNKS_MAX_WAIT, |s| {
+        if s.level_chunks() != seen {
+            seen = s.level_chunks();
+            last_new = Instant::now();
+        }
+        last_new.elapsed() >= CHUNKS_QUIET
+    });
+    info!("{seen} LevelChunk packets in this join");
+}
+
+/// Logs the per-packet table, then the chunk encode cost and the numbers the
+/// "special-case chunks with `Arc`" decision needs.
+fn log_measurements(session: &Session, server: &EmbeddedServer) {
+    if cfg!(debug_assertions) {
+        warn!("This is a debug build: the timings below are meaningless");
+    }
+    session.stats().log_table();
+    let start_game_throughput = session
+        .start_game()
+        .map(|start_game| measure::start_game_throughput(start_game, 1000));
+    match measure::chunk_encode(&server.server, 10) {
+        Some(encode) => measure::log_decision(session.stats(), &encode, start_game_throughput),
+        None => warn!("No loaded chunks to measure"),
+    }
 }
 
 /// Stays in the world for `duration`, still sending input, so the process can
