@@ -112,9 +112,11 @@ impl Stats {
 pub struct ChunkEncode {
     pub chunks: usize,
     pub passes: u32,
-    /// Per chunk: block actors, `encode_chunk` and the batch wrapper, as the
-    /// server's `send_chunks` does them.
+    /// Per chunk: `CLevelChunk::encode_chunk` plus the batch wrapper.
     pub per_chunk: Duration,
+    /// Per chunk: gathering the block actors (`World::bedrock_chunk_block_actors`),
+    /// which `send_chunks` does just before encoding.
+    pub block_actors_per_chunk: Duration,
     pub bytes_per_chunk: f64,
 }
 
@@ -137,10 +139,15 @@ pub fn chunk_encode(server: &Server, passes: u32) -> Option<ChunkEncode> {
 
     let encoder = BedrockBatchEncoder::new();
     let mut bytes = 0usize;
-    let start = Instant::now();
+    let mut encode = Duration::ZERO;
+    let mut gather = Duration::ZERO;
     for _ in 0..passes {
         for chunk in &chunks {
+            let start = Instant::now();
             let block_actors = world.bedrock_chunk_block_actors(chunk);
+            gather += start.elapsed();
+
+            let start = Instant::now();
             let Ok((payload, _blobs)) = CLevelChunk::encode_chunk(chunk, 0, false, &block_actors)
             else {
                 continue;
@@ -158,13 +165,15 @@ pub fn chunk_encode(server: &Server, passes: u32) -> Option<ChunkEncode> {
             {
                 bytes += batch.len();
             }
+            encode += start.elapsed();
         }
     }
     let encodes = chunks.len() as u32 * passes;
     Some(ChunkEncode {
         chunks: chunks.len(),
         passes,
-        per_chunk: start.elapsed() / encodes,
+        per_chunk: encode / encodes,
+        block_actors_per_chunk: gather / encodes,
         bytes_per_chunk: bytes as f64 / f64::from(encodes),
     })
 }
@@ -191,9 +200,11 @@ pub fn log_decision(stats: &Stats, encode: &ChunkEncode, start_game_bytes_per_us
     let join_chunk_encode = encode.per_chunk * u32::try_from(chunks_received).unwrap_or(u32::MAX);
     let tick = Duration::from_millis(50);
     info!(
-        "Chunk encode: {:.1} µs and {:.0} bytes per chunk ({} loaded chunks x {} passes)",
+        "Chunk encode (encode_chunk + batch wrapper): {:.1} µs and {:.0} bytes per chunk; \
+         gathering block actors first: {:.1} µs ({} loaded chunks x {} passes)",
         micros(encode.per_chunk),
         encode.bytes_per_chunk,
+        micros(encode.block_actors_per_chunk),
         encode.chunks,
         encode.passes,
     );
