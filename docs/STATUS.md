@@ -27,7 +27,7 @@ _Last updated: 2026-10-20._
 | --- | --- | --- |
 | 0. Recon | Official Bedrock 1.26.52 joined stock Pumpkin (fork at `aac0a82`) over NetherNet; note in `docs/recon/m0-pumpkin-bedrock.md`; PLAN.md corrected | `main`: `baa0cf0` scaffold, `dab65f0` recon note, `c2d9df1` PLAN.md corrections |
 | 1. Workspace + fork seam | Cargo workspace with `client/`; fork as a submodule; `Transport` trait with NetherNet behind it; Java listener behind `java-listener`; `tracing` in the client. Bedrock 1.26.52 joined a `--no-default-features` server at `80b19bb` with `java.enabled = true` and no TCP 25565 listener | `main`: `1b6b2ad` plan, `ae0bcbe` workspace, `c1feeb2` submodule, `4ec46ac` tracing, `59fd378` profile cleanup, `83b63a9` bump. Fork `limonite`: `df1f8e524` Transport, `80b19bb9b` java-listener |
-| 2. Headless embedded client | The client runs Pumpkin on a background thread and joins it as the host over an in-memory `LocalChannel`: unsigned-token login, spawn, 329 chunks, an 8-block walk the server saw (7.8), and no socket owned by the process. Client codecs in `pumpkin-protocol` behind `client`, golden-tested byte for byte against official-client captures. NetherNet regression join passed. `LocalChannel` cost measured; chunks dominate, so `Arc` comes after M3 | `main`: `ebc85a9` plan, `4d67904` bump + deps, `65114e0` embedded server, `283ee14` login and spawn, `1c2a6ab` walk + check, `a107aeb` measure, `679a421` bump, `7a69f6f` block-actor timing, `4b32b93` packet names, then the tick. Fork `limonite`: `de0f7cedc` accept_bedrock, `7c1fa8063` LocalChannel, `85f58b5f6` client codecs, `03b498c47` NBT test fix |
+| 2. Headless embedded client | The client runs Pumpkin on a background thread and joins it as the host over an in-memory `LocalChannel`: unsigned-token login, spawn, 329 chunks, an 8-block walk the server saw (7.8), and no socket owned by the process. Client codecs in `pumpkin-protocol` behind `client`, golden-tested byte for byte against official-client captures. NetherNet regression join passed. `LocalChannel` cost measured; chunks dominate, and the `Arc` decision is deferred to M3's planning | `main`: `ebc85a9` plan, `4d67904` bump + deps, `65114e0` embedded server, `283ee14` login and spawn, `1c2a6ab` walk + check, `a107aeb` measure, `679a421` bump, `7a69f6f` block-actor timing, `4b32b93` packet names, then the tick. Fork `limonite`: `de0f7cedc` accept_bedrock, `7c1fa8063` LocalChannel, `85f58b5f6` client codecs, `03b498c47` NBT test fix |
 
 Key facts from M0 (details in the recon note, which is required reading before touching the fork):
 - **Transport:** upstream Bedrock is **NetherNet** (WebRTC), not RakNet.
@@ -218,10 +218,17 @@ cargo clippy -p pumpkin-core --all-targets
   layout M3 decodes, summarised in recon §8. M2 only counts `LevelChunk` packets.
 - **Where the decoder lives:** if it needs Pumpkin types that only Pumpkin's own module can
   build, follow the `client_codecs` pattern. Otherwise the client crate is fine.
-- **Finish the measurement:** time chunk *decode* per chunk. Then design the `Arc` special case
-  that PLAN.md now calls for (a seam in `send_chunks`).
-- **Encode is slow:** about 850 µs per 22 KB chunk in release. Profiling `convert_be_network` is
-  a possible upstream improvement.
+- **The `Arc` decision is deferred to M3's planning** (owner, 2026-10-20). Plan these three
+  checks before deciding (PLAN.md, "Why bytes, not structs"):
+  1. **Profile `encode_chunk`** (about 850 µs per 22 KB chunk in release), and look for a cheap
+     speedup that could go upstream first. `convert_be_network`, the palette conversion, is the
+     first suspect.
+  2. **Check how Pumpkin mutates `ChunkData`.** Would a client holding a live `Arc` see a block
+     change before the matching block-update packet arrives? If so, it would need a clone anyway.
+  3. **Estimate the join and streaming costs** (moving through new chunks) at render distances 8,
+     16 and 32, not just one join at 8.
+- **Finish the measurement:** time chunk *decode* per chunk; that's the other half of what
+  `Arc` would save.
 - **Spawn and chunks race:** `PlayStatus::PlayerSpawn` can arrive before any `LevelChunk`.
   Don't treat "spawned" as "chunks loaded".
 - **Batches:** each one holds exactly one packet; the outgoing task sends packets one by one.

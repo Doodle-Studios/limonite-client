@@ -77,11 +77,14 @@ The backend is a source-level fork of [Pumpkin](https://github.com/Pumpkin-MC/Pu
 
 **Why bytes, not structs, on `LocalChannel`.** Pumpkin turns each packet into bytes in game code, before the transport ever sees it (`BedrockClient::serialize_packet`, called from 54 `ClientPlatform::Bedrock` sites across 13 files). Passing structs would mean rewriting all of those call sites, which breaks the small-diff rule. Bytes still skip everything expensive. If M2's measurements show chunk packets dominate, special-case them with `Arc` then.
 
-**M2 measured it, and chunks dominate: special-case them with `Arc` after M3.** Results are in `docs/milestones/m2-plan.md`.
+**M2 measured it, and chunks dominate. The `Arc` decision is deferred to M3's planning** (owner, 2026-10-20). Results are in `docs/milestones/m2-plan.md`.
 - **Bytes:** in a join at radius 8, chunks were 86% of the bytes received: 329 chunks, 7.2 of 8.4 MB.
 - **Encode cost:** each chunk costs the server about 850 µs to encode (release build), so a join's chunk encode is about 280 ms of CPU, 5.6 ticks' worth. Everything else costs well under a millisecond. Framing is 0.7 µs per batch, and copies are negligible.
-- **What `Arc` saves:** passing the host's chunks as `Arc<ChunkData>` skips that encode and the client's decode.
-- **Cost and timing:** it needs one new seam in `send_chunks`. It lands after M3, whose decoder measures the decode half of the saving.
+- **What `Arc` would save:** passing the host's chunks as `Arc<ChunkData>` skips that encode and the client's decode. It costs one new seam in `send_chunks`, plus a second path for chunks.
+- **Before deciding, M3's planning checks three things:**
+  1. Profile `encode_chunk`, and look for a cheap speedup that could go upstream first. If encoding gets cheap, the case for `Arc` weakens.
+  2. Check how Pumpkin mutates `ChunkData`. A client holding a live `Arc` could see block changes before the matching block-update packets arrive. If so, the host would need a clone (a snapshot) anyway, and the saving shrinks.
+  3. Estimate the join cost *and* the streaming cost while moving, at render distances 8, 16 and 32, not just one join at 8.
 
 **Packet types are shared.** The client uses Pumpkin's own Bedrock packet definitions, not a separate protocol crate. One definition on both sides of the channel means the client and server can never disagree on a protocol version. This replaces the earlier idea of using bedrock-rs. The structs need codecs in both directions first (see "What the fork changes").
 
@@ -292,7 +295,7 @@ Each milestone ends in something runnable and is done only when its acceptance c
      - The server's own player moved 7.8 blocks. While in-world the process owned no TCP or UDP socket, and the startup log has no listening or fetch lines.
      - Bedrock 1.26.52 still joins over NetherNet after the `accept_bedrock` move.
      - Sent packets re-encode byte for byte against official-client captures.
-     - Measurements and the `Arc` decision are under "Why bytes, not structs". Plan, results and deviations: `docs/milestones/m2-plan.md`.
+     - Measurements, and the deferred `Arc` decision, are under "Why bytes, not structs". Plan, results and deviations: `docs/milestones/m2-plan.md`.
 3. **Chunk map.** Decode sub-chunks and palettes into world state; dump a top-down map image of loaded chunks.
    - Accept: map image matches what the official client sees at the same seed and position.
 4. **First pixels.** `winit` window, `wgpu` device, CPU meshing of one chunk, fly camera.
