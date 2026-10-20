@@ -651,3 +651,6 @@ existing world, until no chunk had arrived for 2 s:
   `Arc<ChunkData>` to a local transport instead of encoding it. Recorded in PLAN.md.
 - **Separately:** 847 µs to encode 22 KB is slow for what is mostly palette packing. It's worth
   profiling `convert_be_network` in M3 as an upstream candidate.
+
+**Pushed:** the fork's `limonite` branch, `80b19bb..03b498c` (the four M2 fork commits), to
+`Doodle-Studios/Pumpkin` on 2026-10-20, with the owner's OK. The superproject has no remote.
