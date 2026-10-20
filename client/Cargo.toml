@@ -21,6 +21,10 @@ pumpkin-config = { path = "../pumpkin/crates/pumpkin-config" }
 pumpkin-auth = { path = "../pumpkin/crates/pumpkin-auth" }
 # Vector types used in packet fields.
 pumpkin-util = { path = "../pumpkin/crates/pumpkin-util" }
+# Block and biome tables: Bedrock network ids, block names, and the map colours `--map` draws.
+pumpkin-data = { path = "../pumpkin/crates/pumpkin-data" }
+# Chunks carry their block actors (chests, signs, ...) as NBT.
+pumpkin-nbt = { path = "../pumpkin/crates/pumpkin-nbt" }
 
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -30,3 +34,4 @@ rustls.workspace = true
 bytes.workspace = true
 base64.workspace = true
 serde_json.workspace = true
+image.workspace = true

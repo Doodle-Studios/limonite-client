@@ -1611,9 +1611,12 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "bytes",
+ "image",
  "pumpkin-auth",
  "pumpkin-config",
  "pumpkin-core",
+ "pumpkin-data",
+ "pumpkin-nbt",
  "pumpkin-protocol",
  "pumpkin-util",
  "pumpkin-world",
