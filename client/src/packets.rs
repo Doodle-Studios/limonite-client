@@ -10,7 +10,10 @@ use pumpkin_protocol::{
         client::*,
         packet_decoder::BedrockBatchDecoder,
         packet_encoder::BedrockBatchEncoder,
-        server::{container_close::SContainerClose, respawn::SRespawn, text::SText},
+        server::{
+            actor_event::SActorEvent, animate::SAnimate, container_close::SContainerClose,
+            respawn::SRespawn, text::SText,
+        },
     },
     packet::Packet,
 };
@@ -87,6 +90,8 @@ packet_names!(
     CVoxelShapes,
     // Pumpkin sends these serverbound structs to clients too: the packets go
     // both ways with the same layout.
+    SActorEvent,
+    SAnimate,
     SContainerClose,
     SRespawn,
     SText,
@@ -164,6 +169,7 @@ mod tests {
         assert_eq!(PacketName(11).to_string(), "CStartGame");
         assert_eq!(PacketName(58).to_string(), "CLevelChunk");
         assert_eq!(PacketName(9).to_string(), "SText");
+        assert_eq!(PacketName(27).to_string(), "SActorEvent");
         assert_eq!(PacketName(9999).to_string(), "Unknown(9999)");
     }
 
