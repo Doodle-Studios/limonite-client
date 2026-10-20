@@ -1,33 +1,49 @@
 mod embedded;
+mod login;
+mod packets;
+mod session;
 
 use std::{
     io,
     path::{Path, PathBuf},
     process::ExitCode,
+    time::{Duration, Instant},
 };
 
 use pumpkin_world::{CURRENT_BEDROCK_MC_PROTOCOL, CURRENT_BEDROCK_MC_VERSION};
 use tracing::{error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
-use crate::embedded::EmbeddedServer;
+use crate::{
+    embedded::EmbeddedServer,
+    session::{Session, Stage},
+};
 
-const USAGE: &str = "usage: limonite-client [--data-dir <path>]";
+const USAGE: &str = "usage: limonite-client [--data-dir <path>] [--name <name>]";
+
+/// The whole scripted session must finish within this.
+const SESSION_DEADLINE: Duration = Duration::from_secs(120);
+/// How long to keep playing after spawning, so chunks keep arriving.
+const AFTER_SPAWN: Duration = Duration::from_secs(1);
 
 /// Command-line options. Every path is absolute by the time parsing returns.
 struct Args {
     /// Where the embedded server keeps its world and data files.
     data_dir: PathBuf,
+    /// The host's display name.
+    name: String,
 }
 
 impl Args {
     fn parse(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
         let mut data_dir = PathBuf::from("run/client");
+        let mut name = "Limonite".to_string();
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--data-dir" => {
                     data_dir = args.next().ok_or("--data-dir needs a path")?.into();
                 }
+                "--name" => name = args.next().ok_or("--name needs a name")?,
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
@@ -35,7 +51,7 @@ impl Args {
         // directory changes later, and a relative path would change meaning.
         let data_dir = std::path::absolute(&data_dir)
             .map_err(|err| format!("can't resolve {}: {err}", data_dir.display()))?;
-        Ok(Self { data_dir })
+        Ok(Self { data_dir, name })
     }
 }
 
@@ -81,7 +97,38 @@ fn main() -> ExitCode {
         }
     };
 
+    let result = play(&server, &args);
     server.stop();
+    result
+}
+
+/// The scripted host session: log in, spawn, and keep playing for a moment.
+fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
+    let deadline = Instant::now() + SESSION_DEADLINE;
+    let mut session = match Session::connect(&server.connector, &args.name) {
+        Ok(session) => session,
+        Err(err) => {
+            error!("Couldn't connect to the embedded server: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(err) = session.run_until(deadline, |s| s.stage() == Stage::Spawned) {
+        error!("Didn't spawn: {err}");
+        return ExitCode::FAILURE;
+    }
+    let keep_playing_until = Instant::now() + AFTER_SPAWN;
+    if let Err(err) = session.run_until(deadline, |_| Instant::now() >= keep_playing_until) {
+        error!("Lost the session after spawning: {err}");
+        return ExitCode::FAILURE;
+    }
+    info!(
+        "Spawned; {} LevelChunk packets so far",
+        session.level_chunks()
+    );
+    // Dropping the session closes the connection: the host leaves the game
+    // before the server stops.
+    drop(session);
     ExitCode::SUCCESS
 }
 
