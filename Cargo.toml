@@ -28,6 +28,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 bytes = { version = "1.12", default-features = false, features = ["std"] }
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
+# The map's PNG writer. Exactly pumpkin-core's spec, so it adds no new package or feature.
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 
 # Profiles below mirror pumpkin/Cargo.toml. Cargo only reads profiles from the root manifest, so
 # without these the fork would build with different settings here than in pumpkin/.
