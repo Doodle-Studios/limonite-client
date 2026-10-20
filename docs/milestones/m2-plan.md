@@ -644,11 +644,16 @@ existing world, until no chunk had arrived for 2 s:
 - **A join's encode is far more than "noticeable":** 329 × 847 µs = 279 ms, 5.6 × the 50 ms
   tick. It runs on Rayon, not the tick thread, so it doesn't stall ticks directly. It's still
   CPU the host's renderer will want from M4 on.
-- **Recommendation: yes, special-case the host's chunks with `Arc`.** It's scheduled after M3,
-  whose decoder measures the other half of the saving. Skipping the encode alone saves about
-  0.85 ms of CPU per chunk.
+- **Recommendation: yes, special-case the host's chunks with `Arc`.** Skipping the encode alone
+  saves about 0.85 ms of CPU per chunk.
 - **What it costs:** a new seam in `send_chunks` (`net/bedrock/mod.rs`) that hands
-  `Arc<ChunkData>` to a local transport instead of encoding it. Recorded in PLAN.md.
+  `Arc<ChunkData>` to a local transport instead of encoding it.
+- **Owner's decision (2026-10-20): defer to M3's planning.** Before deciding, M3 checks three
+  things, recorded in PLAN.md and STATUS.md:
+  - a cheap, upstream-able `encode_chunk` speedup;
+  - whether Pumpkin's `ChunkData` mutation means a live `Arc` would show changes before their
+    block-update packets, which would force a clone;
+  - join and streaming costs at render distances 8, 16 and 32.
 - **Separately:** 847 µs to encode 22 KB is slow for what is mostly palette packing. It's worth
   profiling `convert_be_network` in M3 as an upstream candidate.
 
