@@ -60,3 +60,4 @@ All three transports implement the `Transport` trait. The host never touches the
 - Never bundle Mojang assets or third-party packs. Vanilla assets load from the user's install.
 - Never connect to public servers or Realms while testing. Embedded server and own LAN only.
 - Never attempt to decrypt Marketplace content.
+- Always update the readme regarding any info that needs to be shared.
