@@ -8,8 +8,12 @@ _Last updated: 2026-10-20._
 
 ## Where we are
 
-- **Current milestone:** 3, the chunk map. **Not planned yet.** Start it in plan mode; read
-  "Notes for M3" below first.
+- **Current milestone:** 3, the chunk map. **Planned and approved on 2026-10-20:**
+  `docs/milestones/m3-plan.md`. Execution hasn't started; begin at its Step 1.
+  - The plan includes the three checks for the deferred `Arc` decision and a decision point
+    (Step 10).
+  - It allows one deliberate non-seam fork edit: an upstream-bound speedup in
+    `pumpkin-world/src/chunk/palette.rs` (Decision 4).
 - **Milestone 2 is done (2026-10-20).** Plan, results and deviations: `docs/milestones/m2-plan.md`.
 - **Pushed, both public, on 2026-10-20 with the owner's OK:**
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
@@ -213,6 +217,8 @@ cargo clippy -p pumpkin-core --all-targets
 - **Untracked on purpose:** `.idea/` (RustRover) and `.claude/settings.local.json`.
 
 ## Notes for M3 (found in M2)
+
+All of these are folded into `docs/milestones/m3-plan.md`.
 
 - **Chunk layout:** `CLevelChunk::encode_chunk` (`net/bedrock/level_chunk.rs:68`) writes the
   layout M3 decodes, summarised in recon §8. M2 only counts `LevelChunk` packets.
