@@ -11,6 +11,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     process::ExitCode,
+    thread,
     time::{Duration, Instant},
 };
 
@@ -48,6 +49,9 @@ const CHUNKS_QUIET: Duration = Duration::from_secs(2);
 const CHUNKS_MAX_WAIT: Duration = Duration::from_secs(180);
 /// How long the world comparison keeps retrying while block updates land.
 const WORLD_SETTLE: Duration = Duration::from_secs(2);
+/// How many ticks a still-differing chunk gets for a fresh encode to decode
+/// equal to the server.
+const FRESH_DECODE_ATTEMPTS: u32 = 5;
 
 /// Command-line options. Every path is absolute by the time parsing returns.
 struct Args {
@@ -376,32 +380,71 @@ fn check_world(session: &mut Session, server: &EmbeddedServer) -> Check {
             differing.is_empty()
         });
     }
+    // A chunk that still differs is either a decoder bug or a change the
+    // server never sent. A fresh encode of the server's chunk tells them
+    // apart: if our decoder reads it back equal to the server, the decoder is
+    // right and the difference is drift. Retried on later ticks, since the
+    // server can change the chunk between the encode and the comparison.
+    let mut drifted = 0;
+    let mut fresh_examples = Vec::new();
+    differing.retain(|&(x, z)| {
+        for _ in 0..FRESH_DECODE_ATTEMPTS {
+            let Some(server_chunk) = level
+                .loaded_chunks
+                .get(&Vector2::new(x, z))
+                .map(|entry| entry.value().clone())
+            else {
+                return true;
+            };
+            let mut attempt = Vec::new();
+            if checks::fresh_decode_matches(&server_chunk, session.world().blocks(), &mut attempt) {
+                drifted += 1;
+                return false;
+            }
+            fresh_examples = attempt;
+            session.tick();
+            thread::sleep(TICK);
+        }
+        true
+    });
+
     let took = start.elapsed().as_secs_f64();
     let not_loaded = positions.len() - compared;
     if differing.is_empty() && compared > 0 {
-        return Check::new(
-            NAME,
-            true,
-            format!(
-                "{compared} chunks equal block for block on both layers and biome for biome: \
-                 {} on the full pass ({full_pass:.2} s), {first_differing} on a re-check; \
-                 {not_loaded} no longer loaded on the server; {took:.2} s",
-                compared - first_differing,
-            ),
+        let mut detail = format!(
+            "{compared} chunks equal block for block on both layers and biome for biome: \
+             {} on the full pass ({full_pass:.2} s), {} on a re-check",
+            compared - first_differing,
+            first_differing - drifted,
         );
+        if drifted > 0 {
+            for example in &examples {
+                warn!("Changed by the server without an UpdateBlock: {example}");
+            }
+            detail += &format!(
+                "; {drifted} hold {differ} values the server changed without sending an \
+                 UpdateBlock (logged above), and a fresh encode of each decodes equal to the \
+                 server"
+            );
+        }
+        detail += &format!("; {not_loaded} no longer loaded on the server; {took:.2} s");
+        return Check::new(NAME, true, detail);
     }
     for example in &examples {
         warn!("Difference: {example}");
+    }
+    for example in &fresh_examples {
+        warn!("Difference in a fresh encode: {example}");
     }
     Check::new(
         NAME,
         false,
         format!(
-            "{} of {compared} chunks still differ after {:.1} s of re-checks, {differ} values \
-             (first {} logged above); {took:.2} s",
+            "{} of {compared} chunks still differ after {:.1} s of re-checks, {differ} values, \
+             and a fresh encode doesn't decode equal to the server either (logged above); \
+             {took:.2} s",
             differing.len(),
             WORLD_SETTLE.as_secs_f64(),
-            examples.len(),
         ),
     )
 }

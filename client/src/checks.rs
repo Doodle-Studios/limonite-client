@@ -3,14 +3,14 @@
 //! M2's "no socket is opened" can't be made from inside the process; it's
 //! done from outside while the session lingers.
 
-use pumpkin_core::server::Server;
+use pumpkin_core::{net::bedrock::level_chunk::CLevelChunk, server::Server};
 use pumpkin_data::{Block, BlockState, BlockStateId, biome::Biome};
 use pumpkin_world::chunk::{ChunkData, palette::bedrock_water_state};
 use tracing::{error, info};
 
 use crate::{
     session::{Session, Spawn},
-    world::{BlockTable, chunk::Chunk},
+    world::{BlockTable, chunk::Chunk, level_chunk},
 };
 
 /// How far east the host must have moved, as the server sees it.
@@ -186,6 +186,29 @@ pub fn compare_chunk(
     differ
 }
 
+/// Encodes the server's chunk as it is now, decodes it with our decoder, and
+/// compares the result with the server. True if they're equal at every
+/// position.
+///
+/// That separates two causes when our world still differs from the server
+/// after the re-checks: a decoder bug (this fails too) or a change the server
+/// made without sending an `UpdateBlock` (this passes). Pumpkin's fire does
+/// that: it sets blocks with `NOTIFY_NEIGHBORS` only, which never queues a
+/// client update.
+pub fn fresh_decode_matches(server: &ChunkData, names: &BlockTable, out: &mut Vec<String>) -> bool {
+    // Block actors don't affect the comparison.
+    let decoded = CLevelChunk::encode_chunk(server, 0, false, &[])
+        .map_err(|err| err.to_string())
+        .and_then(|(payload, _)| level_chunk::decode(&payload).map_err(|err| err.to_string()));
+    match decoded {
+        Ok(fresh) => compare_chunk(server, &fresh, names, out, 10) == 0,
+        Err(err) => {
+            out.push(format!("chunk ({}, {}): fresh encode failed: {err}", server.x, server.z));
+            false
+        }
+    }
+}
+
 fn block_name(state: BlockStateId) -> &'static str {
     Block::from_state_id(state).name
 }
@@ -200,4 +223,34 @@ pub fn report(checks: &[Check]) -> bool {
         }
     }
     checks.iter().all(|check| check.passed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::level_chunk;
+
+    /// The fire case: the server changes a block after sending the chunk and
+    /// never sends an `UpdateBlock`. Our copy then differs, but a fresh encode
+    /// decodes equal to the server, so the decoder isn't to blame.
+    #[test]
+    fn a_silent_server_change_is_told_apart_from_a_decoder_bug() {
+        let server = ChunkData::empty(2, -1);
+        server
+            .section
+            .set_block_absolute_y(4, 70, 5, Block::FIRE.default_state.id);
+        let (payload, _) = CLevelChunk::encode_chunk(&server, 0, false, &[]).unwrap();
+        let ours = level_chunk::decode(&payload).unwrap();
+        let names = BlockTable::build();
+        let mut out = Vec::new();
+        assert_eq!(compare_chunk(&server, &ours, &names, &mut out, 10), 0);
+
+        // The fire goes out on the server only.
+        server
+            .section
+            .set_block_absolute_y(4, 70, 5, Block::AIR.default_state.id);
+        assert_eq!(compare_chunk(&server, &ours, &names, &mut out, 10), 1);
+        assert!(out[0].starts_with("(36, 70, -11) layer 0: ours fire"), "{}", out[0]);
+        assert!(fresh_decode_matches(&server, &names, &mut Vec::new()));
+    }
 }
