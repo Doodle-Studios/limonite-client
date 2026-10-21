@@ -5,7 +5,7 @@
 //! just as Pumpkin's own `main` would run it, and the two sides talk only
 //! through a `LocalChannel` and a few shared handles.
 
-use std::{sync::Arc, sync::mpsc, thread, time::Duration};
+use std::{num::NonZero, sync::Arc, sync::mpsc, thread, time::Duration};
 
 use pumpkin_config::PumpkinConfig;
 use pumpkin_core::{
@@ -31,6 +31,9 @@ pub fn config() -> PumpkinConfig {
     networking.bedrock.online_mode = false;
     // Already compiled out (no `java-listener` feature); this keeps the config honest.
     networking.java.enabled = false;
+    // The server clamps the radius a Bedrock client asks for to this. Its
+    // default, 16, would cap `--radius`; 32 lets M3 measure radius 32.
+    networking.bedrock.view_distance = NonZero::new(32).unwrap_or(NonZero::<u8>::MIN);
     // Pumpkin's default sends a heartbeat to market.pumpkinmc.org.
     config.telemetry.enabled = false;
     config.advanced.plugins.enabled = false;

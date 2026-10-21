@@ -46,8 +46,6 @@ use crate::{
 
 /// One client tick, as in vanilla.
 pub const TICK: Duration = Duration::from_millis(50);
-/// The view distance the host asks for, in chunks.
-const CHUNK_RADIUS: i32 = 8;
 /// Bedrock's input-mode and play-mode values for mouse and keyboard on a
 /// screen, as the official client sends them.
 const INPUT_MODE_MOUSE: u32 = 1;
@@ -57,6 +55,8 @@ const PLAY_MODE_SCREEN: u32 = 2;
 const STANDING_DELTA_Y: f32 = -0.078_4;
 /// How far the host walks each tick: about walking speed.
 const WALK_STEP: f32 = 0.2;
+/// How far the host flies each tick: creative flying speed, 10.9 m/s.
+pub const FLY_STEP: f32 = 0.55;
 /// The yaw that faces +X (east). Yaw 0 faces +Z, and yaw grows clockwise
 /// seen from above.
 const YAW_EAST: f32 = -90.0;
@@ -108,8 +108,11 @@ pub struct Session {
     position: Vector3<f32>,
     /// Ticks of input sent so far; also the input packets' tick number.
     input_tick: u64,
-    /// Ticks of walking still to do.
+    /// Ticks of moving east still to do, and how far each one goes.
     walk_ticks: u32,
+    step: f32,
+    /// The view distance the host asks for, in chunks.
+    chunk_radius: i32,
     /// `LevelChunk` packets received, decoded or not.
     level_chunks: u32,
     /// The client's picture of the world, built from the packets.
@@ -131,7 +134,11 @@ impl Session {
     ///
     /// # Errors
     /// If the server isn't accepting local connections.
-    pub fn connect(connector: &LocalConnector, name: &str) -> std::io::Result<Self> {
+    pub fn connect(
+        connector: &LocalConnector,
+        name: &str,
+        chunk_radius: i32,
+    ) -> std::io::Result<Self> {
         let client = connector.connect()?;
         let session = Self {
             client,
@@ -140,6 +147,8 @@ impl Session {
             position: Vector3::new(0.0, 0.0, 0.0),
             input_tick: 0,
             walk_ticks: 0,
+            step: WALK_STEP,
+            chunk_radius,
             level_chunks: 0,
             world: World::new(),
             chunks_decoded: 0,
@@ -202,6 +211,20 @@ impl Session {
     /// the server trusts what the client reports. This tests the transport.
     pub const fn walk(&mut self, ticks: u32) {
         self.walk_ticks = ticks;
+        self.step = WALK_STEP;
+    }
+
+    /// Flies east (+X) at [`FLY_STEP`] blocks a tick for `ticks` ticks, with
+    /// the eyes at `eye_y` from the next tick on.
+    ///
+    /// The server takes the reported position as it is, with no speed or
+    /// collision check, so this is a straight line through the air. Flying
+    /// above the terrain keeps the server from suffocating the player in a
+    /// hillside.
+    pub const fn fly_east(&mut self, ticks: u32, eye_y: f32) {
+        self.position.y = eye_y;
+        self.walk_ticks = ticks;
+        self.step = FLY_STEP;
     }
 
     pub const fn is_walking(&self) -> bool {
@@ -234,11 +257,36 @@ impl Session {
     }
 
     /// One tick: handle everything that arrived, then send this tick's input.
-    fn tick(&mut self) {
+    ///
+    /// Public so long work on the main thread (the measurements) can call it
+    /// in between: the server drops a client it hasn't heard from in 10 s.
+    pub fn tick(&mut self) {
+        self.drain();
+        if self.stage == Stage::Disconnected {
+            return;
+        }
+
+        // Input starts with `StartGame`: the server ignores it until the
+        // player has loaded, but any packet keeps its 10 s timeout away.
+        if self.spawn.is_some() && self.stage != Stage::Disconnected {
+            let walking = self.walk_ticks > 0;
+            if walking {
+                self.position.x += self.step;
+                self.walk_ticks -= 1;
+            }
+            let input = self.input(walking);
+            self.send(&input);
+            self.input_tick += 1;
+        }
+    }
+
+    /// Handles everything that has arrived, without sending input. Called on
+    /// its own, it times arrivals more finely than a tick.
+    pub fn drain(&mut self) {
         loop {
             match self.client.try_recv() {
                 Ok(batch) => self.handle_batch(batch),
-                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Empty) => return,
                 Err(TryRecvError::Disconnected) => {
                     if self.stage != Stage::Disconnected {
                         warn!("The server closed the connection");
@@ -247,19 +295,6 @@ impl Session {
                     return;
                 }
             }
-        }
-
-        // Input starts with `StartGame`: the server ignores it until the
-        // player has loaded, but any packet keeps its 10 s timeout away.
-        if self.spawn.is_some() && self.stage != Stage::Disconnected {
-            let walking = self.walk_ticks > 0;
-            if walking {
-                self.position.x += WALK_STEP;
-                self.walk_ticks -= 1;
-            }
-            let input = self.input(walking);
-            self.send(&input);
-            self.input_tick += 1;
         }
     }
 
@@ -376,8 +411,8 @@ impl Session {
         self.start_game = Some(start_game);
         self.stage = Stage::Spawning;
         self.send(&SRequestChunkRadius {
-            chunk_radius: VarInt(CHUNK_RADIUS),
-            max_chunk_radius: CHUNK_RADIUS as u8,
+            chunk_radius: VarInt(self.chunk_radius),
+            max_chunk_radius: self.chunk_radius as u8,
         });
     }
 
@@ -417,7 +452,7 @@ impl Session {
         input_data.set(InputData::VerticalCollision as usize, true);
         let (yaw, move_vec, delta_x) = if walking {
             input_data.set(InputData::Up as usize, true);
-            (YAW_EAST, Vector2::new(0.0, 1.0), WALK_STEP)
+            (YAW_EAST, Vector2::new(0.0, 1.0), self.step)
         } else {
             (spawn_yaw, Vector2::new(0.0, 0.0), 0.0)
         };
