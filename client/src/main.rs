@@ -27,7 +27,13 @@ use crate::{
 };
 
 const USAGE: &str = "usage: limonite-client [--data-dir <path>] [--name <name>] \
-                     [--linger <seconds>] [--measure] [--map <path.png>]";
+                     [--linger <seconds>] [--measure] [--map <path.png>] [--radius <chunks>] \
+                     [--stream <blocks>]";
+
+/// The view distance asked for without `--radius`, in chunks.
+const DEFAULT_RADIUS: i32 = 8;
+/// The most `--radius` accepts: the embedded server's Bedrock view distance.
+const MAX_RADIUS: i32 = 32;
 
 /// Login and spawn must finish within this.
 const SPAWN_DEADLINE: Duration = Duration::from_secs(120);
@@ -37,8 +43,9 @@ const WALK_TICKS: u32 = 40;
 const SETTLE: Duration = Duration::from_secs(5);
 /// The join is over once no chunk has arrived for this long...
 const CHUNKS_QUIET: Duration = Duration::from_secs(2);
-/// ...or after this, whichever comes first.
-const CHUNKS_MAX_WAIT: Duration = Duration::from_secs(60);
+/// ...or after this, whichever comes first. A radius-32 join into a fresh
+/// world is about 3,200 chunks of worldgen, so this is generous.
+const CHUNKS_MAX_WAIT: Duration = Duration::from_secs(180);
 /// How long the world comparison keeps retrying while block updates land.
 const WORLD_SETTLE: Duration = Duration::from_secs(2);
 
@@ -55,6 +62,10 @@ struct Args {
     measure: bool,
     /// Where to write a top-down PNG map of the loaded chunks.
     map: Option<PathBuf>,
+    /// The view distance to ask for, in chunks.
+    radius: i32,
+    /// After the join, fly this many blocks east and log how chunks stream.
+    stream: Option<u32>,
 }
 
 impl Args {
@@ -64,6 +75,8 @@ impl Args {
         let mut linger = Duration::ZERO;
         let mut measure = false;
         let mut map = None;
+        let mut radius = DEFAULT_RADIUS;
+        let mut stream = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--data-dir" => {
@@ -79,6 +92,22 @@ impl Args {
                 }
                 "--measure" => measure = true,
                 "--map" => map = Some(PathBuf::from(args.next().ok_or("--map needs a path")?)),
+                "--radius" => {
+                    let chunks = args.next().ok_or("--radius needs a number of chunks")?;
+                    radius = chunks
+                        .parse()
+                        .ok()
+                        .filter(|r| (2..=MAX_RADIUS).contains(r))
+                        .ok_or(format!("--radius: `{chunks}` isn't 2 to {MAX_RADIUS} chunks"))?;
+                }
+                "--stream" => {
+                    let blocks = args.next().ok_or("--stream needs a number of blocks")?;
+                    stream = Some(
+                        blocks
+                            .parse()
+                            .map_err(|_| format!("--stream: `{blocks}` isn't a number of blocks"))?,
+                    );
+                }
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
@@ -93,6 +122,8 @@ impl Args {
             linger,
             measure,
             map: map.as_deref().map(absolute).transpose()?,
+            radius,
+            stream,
         })
     }
 }
@@ -147,7 +178,7 @@ fn main() -> ExitCode {
 /// The scripted host session: log in, spawn, walk east, check the move on the
 /// server, optionally linger, and report.
 fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
-    let mut session = match Session::connect(&server.connector, &args.name) {
+    let mut session = match Session::connect(&server.connector, &args.name, args.radius) {
         Ok(session) => session,
         Err(err) => {
             error!("Couldn't connect to the embedded server: {err}");
@@ -172,9 +203,12 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
             checks.push(walk_and_check(&mut session, server, &spawn));
             // `PlayerSpawn` only means the server has queued enough chunks,
             // not that they've arrived, so wait for them before checking.
-            wait_for_chunks(&mut session);
+            let join_chunks = wait_for_chunks(&mut session);
             if args.measure {
-                log_measurements(&session, server);
+                measure(&mut session, server, join_chunks);
+            }
+            if let Some(blocks) = args.stream {
+                measure::stream(&mut session, blocks, join_chunks);
             }
             true
         }
@@ -374,7 +408,8 @@ fn check_world(session: &mut Session, server: &EmbeddedServer) -> Check {
 
 /// Keeps playing until the join's chunks stop arriving, so the checks and
 /// measurements cover a whole join.
-fn wait_for_chunks(session: &mut Session) {
+fn wait_for_chunks(session: &mut Session) -> u32 {
+    let start = Instant::now();
     let mut seen = session.level_chunks();
     let mut last_new = Instant::now();
     let _ = session.run_until(Instant::now() + CHUNKS_MAX_WAIT, |s| {
@@ -384,12 +419,17 @@ fn wait_for_chunks(session: &mut Session) {
         }
         last_new.elapsed() >= CHUNKS_QUIET
     });
-    info!("{seen} LevelChunk packets in this join");
+    info!(
+        "{seen} LevelChunk packets in this join (waited {:.1} s)",
+        start.elapsed().as_secs_f64()
+    );
+    seen
 }
 
-/// Logs the per-packet table, then the chunk encode cost and the numbers the
-/// "special-case chunks with `Arc`" decision needs.
-fn log_measurements(session: &Session, server: &EmbeddedServer) {
+/// Logs the per-packet table, then the chunk cost phases and the numbers the
+/// "special-case chunks with `Arc`" decision needs, then runs the block
+/// change probe.
+fn measure(session: &mut Session, server: &EmbeddedServer, join_chunks: u32) {
     if cfg!(debug_assertions) {
         warn!("This is a debug build: the timings below are meaningless");
     }
@@ -397,10 +437,13 @@ fn log_measurements(session: &Session, server: &EmbeddedServer) {
     let start_game_throughput = session
         .start_game()
         .map(|start_game| measure::start_game_throughput(start_game, 1000));
-    match measure::chunk_encode(&server.server, 10) {
-        Some(encode) => measure::log_decision(session.stats(), &encode, start_game_throughput),
+    match measure::chunk_costs(&server.server, 10, || session.tick()) {
+        Some(costs) => {
+            measure::log_costs(session.stats(), &costs, join_chunks, start_game_throughput);
+        }
         None => warn!("No loaded chunks to measure"),
     }
+    measure::block_change_probe(session, &server.server);
 }
 
 /// Stays in the world for `duration`, still sending input, so the process can

@@ -27,6 +27,8 @@ cargo run -p limonite-client -- --map run/m3/map.png
 | `--data-dir <path>` | Where the world is kept (default `run/client`) |
 | `--name <name>` | The host's display name (default `Limonite`) |
 | `--linger <seconds>` | Stays in the world afterwards |
-| `--measure` | Logs what the in-process channel costs; only meaningful in a release build |
+| `--measure` | Logs what the in-process channel costs, chunk encode and decode split into phases, and how fast a block change reaches the client; only meaningful in a release build |
+| `--radius <chunks>` | The view distance to ask for, 2 to 32 (default 8) |
+| `--stream <blocks>` | After joining, flies that many blocks east at creative flying speed and logs how fast new chunks arrive |
 
 The first build needs the Pumpkin submodule, cloned with long paths on Windows. Setup, build times and known issues are in [docs/STATUS.md](docs/STATUS.md).
