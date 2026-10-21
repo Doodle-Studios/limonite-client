@@ -13,14 +13,16 @@ use std::{
     time::{Duration, Instant},
 };
 
+use pumpkin_util::math::vector2::Vector2;
 use pumpkin_world::{CURRENT_BEDROCK_MC_PROTOCOL, CURRENT_BEDROCK_MC_VERSION};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, filter::LevelFilter};
 
 use crate::{
     checks::Check,
     embedded::EmbeddedServer,
     session::{Session, Stage, TICK},
+    world::World,
 };
 
 const USAGE: &str =
@@ -32,10 +34,12 @@ const SPAWN_DEADLINE: Duration = Duration::from_secs(120);
 const WALK_TICKS: u32 = 40;
 /// How long to wait for the server to apply the walk before checking it.
 const SETTLE: Duration = Duration::from_secs(5);
-/// With `--measure`: the join is over once no chunk has arrived for this long...
+/// The join is over once no chunk has arrived for this long...
 const CHUNKS_QUIET: Duration = Duration::from_secs(2);
 /// ...or after this, whichever comes first.
 const CHUNKS_MAX_WAIT: Duration = Duration::from_secs(60);
+/// How long the world comparison keeps retrying while block updates land.
+const WORLD_SETTLE: Duration = Duration::from_secs(2);
 
 /// Command-line options. Every path is absolute by the time parsing returns.
 struct Args {
@@ -156,21 +160,26 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
         Err(err) => Check::new("spawn", false, err.to_string()),
     }];
 
-    match (spawned, session.spawn()) {
+    let spawned = match (spawned, session.spawn()) {
         (Ok(()), Some(spawn)) => {
             checks.push(walk_and_check(&mut session, server, &spawn));
+            // `PlayerSpawn` only means the server has queued enough chunks,
+            // not that they've arrived, so wait for them before checking.
+            wait_for_chunks(&mut session);
             if args.measure {
-                wait_for_chunks(&mut session);
                 log_measurements(&session, server);
             }
-            linger(&mut session, args.linger);
+            true
         }
-        _ => checks.push(Check::new(
-            "movement",
-            false,
-            "not checked: never spawned".to_string(),
-        )),
-    }
+        _ => {
+            checks.push(Check::new(
+                "movement",
+                false,
+                "not checked: never spawned".to_string(),
+            ));
+            false
+        }
+    };
 
     let chunks = session.level_chunks();
     checks.push(Check::new(
@@ -178,6 +187,22 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
         chunks > 4,
         format!("{chunks} LevelChunk packets received (needs more than 4)"),
     ));
+    checks.push(checks::chunks_decoded(
+        chunks,
+        session.chunks_decoded(),
+        session.world_errors(),
+        session.ids_hashed(),
+    ));
+    if spawned {
+        checks.push(check_world(&mut session, server));
+        linger(&mut session, args.linger);
+    } else {
+        checks.push(Check::new(
+            "world matches server",
+            false,
+            "not checked: never spawned".to_string(),
+        ));
+    }
     // Dropping the session closes the connection: the host leaves the game
     // before the server stops.
     drop(session);
@@ -208,8 +233,110 @@ fn walk_and_check(session: &mut Session, server: &EmbeddedServer, spawn: &sessio
     checks::movement(&server.server, spawn)
 }
 
-/// Keeps playing until the join's chunks stop arriving, so the measurements
-/// cover a whole join.
+/// Compares every decoded chunk the server still has loaded with the
+/// server's copy, block for block on both layers and biome for biome.
+///
+/// The server keeps ticking while we compare, and a block change (a sheep
+/// eating grass, a mob lighting redstone ore) reaches us as an `UpdateBlock`
+/// a tick or more later. A full pass takes several ticks, longer than a whole
+/// second in a dev build, so some chunk will usually be caught mid-change.
+/// So after the full pass, the chunks that differed are compared again each
+/// tick for up to [`WORLD_SETTLE`]. Each chunk must still equal the server's
+/// exactly at one moment, so a real decode error can never pass.
+fn check_world(session: &mut Session, server: &EmbeddedServer) -> Check {
+    const NAME: &str = "world matches server";
+    let Some(level) = server.server.worlds.load().first().map(|world| world.level.clone()) else {
+        return Check::new(NAME, false, "the server has no world".to_string());
+    };
+    // Compares one of our chunks: `None` if the server no longer has it,
+    // otherwise how many values differ.
+    let compare = |world: &World, (x, z): (i32, i32), examples: &mut Vec<String>| {
+        let ours = world.chunk(x, z)?;
+        let server_chunk = level
+            .loaded_chunks
+            .get(&Vector2::new(x, z))
+            .map(|entry| entry.value().clone())?;
+        Some(checks::compare_chunk(&server_chunk, ours, world.blocks(), examples, 10))
+    };
+
+    let start = Instant::now();
+    let mut examples = Vec::new();
+    let mut compared = 0usize;
+    let mut differing = Vec::new();
+    let positions: Vec<_> = session.world().chunks().map(|c| (c.x, c.z)).collect();
+    for &pos in &positions {
+        match compare(session.world(), pos, &mut examples) {
+            Some(0) => compared += 1,
+            Some(_) => {
+                compared += 1;
+                differing.push(pos);
+            }
+            None => {}
+        }
+    }
+    let full_pass = start.elapsed().as_secs_f64();
+    let mut first_differing = differing.len();
+    debug!(
+        "World comparison: {compared} chunks in {full_pass:.2} s, {first_differing} differ; \
+         re-checking those"
+    );
+    for example in &examples {
+        debug!("Full-pass difference: {example}");
+    }
+
+    let mut differ = 0;
+    if !differing.is_empty() {
+        let _ = session.run_until(Instant::now() + WORLD_SETTLE, |s| {
+            examples.clear();
+            differ = 0;
+            differing.retain(|&pos| match compare(s.world(), pos, &mut examples) {
+                Some(0) => false,
+                None => {
+                    // Unloaded by the server meanwhile: no longer comparable.
+                    compared -= 1;
+                    first_differing -= 1;
+                    false
+                }
+                Some(n) => {
+                    differ += n;
+                    true
+                }
+            });
+            differing.is_empty()
+        });
+    }
+    let took = start.elapsed().as_secs_f64();
+    let not_loaded = positions.len() - compared;
+    if differing.is_empty() && compared > 0 {
+        return Check::new(
+            NAME,
+            true,
+            format!(
+                "{compared} chunks equal block for block on both layers and biome for biome: \
+                 {} on the full pass ({full_pass:.2} s), {first_differing} on a re-check; \
+                 {not_loaded} no longer loaded on the server; {took:.2} s",
+                compared - first_differing,
+            ),
+        );
+    }
+    for example in &examples {
+        warn!("Difference: {example}");
+    }
+    Check::new(
+        NAME,
+        false,
+        format!(
+            "{} of {compared} chunks still differ after {:.1} s of re-checks, {differ} values \
+             (first {} logged above); {took:.2} s",
+            differing.len(),
+            WORLD_SETTLE.as_secs_f64(),
+            examples.len(),
+        ),
+    )
+}
+
+/// Keeps playing until the join's chunks stop arriving, so the checks and
+/// measurements cover a whole join.
 fn wait_for_chunks(session: &mut Session) {
     let mut seen = session.level_chunks();
     let mut last_new = Instant::now();
