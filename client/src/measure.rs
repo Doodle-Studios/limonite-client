@@ -534,8 +534,9 @@ fn wait_for_block(
     }
 }
 
-/// The eye height `--stream` flies at: above any overworld terrain.
-const STREAM_EYE_Y: f32 = 330.0;
+/// The eye height measured runs stay at and `--stream` flies at: above any
+/// overworld terrain.
+pub const SAFE_EYE_Y: f32 = 330.0;
 /// Bedrock clients get at most this many chunks per server tick
 /// (`INITIAL_CHUNKS_PER_TICK`, which only Java acknowledgements change).
 const CHUNKS_PER_TICK_CAP: f64 = 9.0;
@@ -543,10 +544,12 @@ const CHUNKS_PER_TICK_CAP: f64 = 9.0;
 /// Check 3, streaming: flies `blocks` east at creative flying speed and
 /// logs how many `LevelChunk`s arrive per second, against the estimate
 /// d·v/16 from a join of `join_chunks` chunks and the server's cap.
-pub fn stream(session: &mut Session, blocks: u32, join_chunks: u32) {
+pub fn stream(session: &mut Session, server: &Server, blocks: u32, join_chunks: u32) {
     let ticks = (blocks as f32 / FLY_STEP).ceil() as u32;
     let before = session.level_chunks();
-    session.fly_east(ticks, STREAM_EYE_Y);
+    let server_x = || server.get_all_players().first().map(|player| player.position().x);
+    let server_start = server_x();
+    session.fly_east(ticks, SAFE_EYE_Y);
     info!("Streaming: flying {blocks} blocks east at {FLY_STEP} blocks a tick ({ticks} ticks)");
 
     let start = Instant::now();
@@ -575,6 +578,15 @@ pub fn stream(session: &mut Session, blocks: u32, join_chunks: u32) {
         last_new.elapsed() >= Duration::from_secs(2)
     });
     let tail = session.level_chunks() - stopped;
+    // The server's own view: a dead or stuck player's input is ignored, and
+    // then nothing streams.
+    match (server_start, server_x()) {
+        (Some(start), Some(end)) => info!(
+            "Streaming: the server's player moved {:.1} blocks east",
+            end - start
+        ),
+        _ => warn!("Streaming: the server has no player"),
+    }
 
     let speed = f64::from(blocks) / flight;
     let rate = f64::from(during) / flight;
