@@ -231,11 +231,6 @@ impl BlockTable {
         self.java_state(bedrock)
             .map_or_else(|| format!("unknown {bedrock:#010x}"), |state| block_name(state).to_string())
     }
-
-    #[must_use]
-    pub const fn collisions(&self) -> usize {
-        self.collisions
-    }
 }
 
 fn block_name(state: BlockStateId) -> &'static str {

@@ -1,6 +1,7 @@
 mod checks;
 mod embedded;
 mod login;
+mod map;
 mod measure;
 mod packets;
 mod session;
@@ -25,8 +26,8 @@ use crate::{
     world::World,
 };
 
-const USAGE: &str =
-    "usage: limonite-client [--data-dir <path>] [--name <name>] [--linger <seconds>] [--measure]";
+const USAGE: &str = "usage: limonite-client [--data-dir <path>] [--name <name>] \
+                     [--linger <seconds>] [--measure] [--map <path.png>]";
 
 /// Login and spawn must finish within this.
 const SPAWN_DEADLINE: Duration = Duration::from_secs(120);
@@ -52,6 +53,8 @@ struct Args {
     linger: Duration,
     /// Log what the `LocalChannel` cost (meaningful in release builds only).
     measure: bool,
+    /// Where to write a top-down PNG map of the loaded chunks.
+    map: Option<PathBuf>,
 }
 
 impl Args {
@@ -60,6 +63,7 @@ impl Args {
         let mut name = "Limonite".to_string();
         let mut linger = Duration::ZERO;
         let mut measure = false;
+        let mut map = None;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--data-dir" => {
@@ -74,18 +78,21 @@ impl Args {
                     linger = Duration::from_secs(secs);
                 }
                 "--measure" => measure = true,
+                "--map" => map = Some(PathBuf::from(args.next().ok_or("--map needs a path")?)),
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
         // Resolve now, against the directory we were started in: the working
         // directory changes later, and a relative path would change meaning.
-        let data_dir = std::path::absolute(&data_dir)
-            .map_err(|err| format!("can't resolve {}: {err}", data_dir.display()))?;
+        let absolute = |path: &Path| {
+            std::path::absolute(path).map_err(|err| format!("can't resolve {}: {err}", path.display()))
+        };
         Ok(Self {
-            data_dir,
+            data_dir: absolute(&data_dir)?,
             name,
             linger,
             measure,
+            map: map.as_deref().map(absolute).transpose()?,
         })
     }
 }
@@ -187,12 +194,7 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
         chunks > 4,
         format!("{chunks} LevelChunk packets received (needs more than 4)"),
     ));
-    checks.push(checks::chunks_decoded(
-        chunks,
-        session.chunks_decoded(),
-        session.world_errors(),
-        session.ids_hashed(),
-    ));
+    checks.push(checks::chunks_decoded(&session));
     if spawned {
         checks.push(check_world(&mut session, server));
         linger(&mut session, args.linger);
@@ -203,14 +205,49 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
             "not checked: never spawned".to_string(),
         ));
     }
+    let mut passed = checks::report(&checks);
+    if let Some(path) = &args.map {
+        passed &= write_map(&session, path);
+    }
     // Dropping the session closes the connection: the host leaves the game
     // before the server stops.
     drop(session);
 
-    if checks::report(&checks) {
+    if passed {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+/// Writes the map of the loaded chunks, marking the host. Returns false if it
+/// couldn't.
+fn write_map(session: &Session, path: &Path) -> bool {
+    let host = session.spawn().map(|_| session.position());
+    if let Some(host) = host {
+        info!(
+            "Host at x {:.1}, z {:.1} (eyes at y {:.1})",
+            host.x, host.z, host.y
+        );
+    }
+    match map::write(session.world(), host, path) {
+        Ok(map) => {
+            let (width, height) = map.image.dimensions();
+            info!(
+                "Map: {} chunks, {width}×{height} px, {} unknown ids -> {}",
+                map.chunks,
+                map.unknown_ids.len(),
+                path.display()
+            );
+            for id in &map.unknown_ids {
+                debug!("Unknown block id on the map: {id:#010x}");
+            }
+            true
+        }
+        Err(err) => {
+            error!("Couldn't write the map: {err}");
+            false
+        }
     }
 }
 

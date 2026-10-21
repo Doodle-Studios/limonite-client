@@ -20,6 +20,7 @@ pub struct SubChunk {
 pub struct Chunk {
     pub x: i32,
     pub z: i32,
+    #[cfg_attr(not(test), expect(dead_code, reason = "kept for M4, which renders other dimensions"))]
     pub dimension: i32,
     /// The section index (block y / 16) of `sub_chunks[0]`: -4 in the overworld.
     pub min_section: i32,
