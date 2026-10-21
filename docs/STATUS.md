@@ -270,6 +270,17 @@ All of these are folded into `docs/milestones/m3-plan.md`.
   bans, whitelist and user cache from the working directory.
 - **The `client` codec feature in `pumpkin-protocol`**, with its golden fixtures.
 - **Compression ignores its threshold:** every packet is deflated, even tiny ones (recon §5).
-- **Chunk encode speed** (see Notes for M3).
+- **Faster Bedrock palette conversion:** fork commit `e251ffb`, which touches only
+  `pumpkin-world/src/chunk/palette.rs` and cherry-picks onto upstream `master` unchanged. It
+  replaces a SipHash lookup per block with a per-palette table. The output is byte-identical,
+  checked against the old code kept as a test oracle. Before and after numbers are in
+  `docs/milestones/m3-plan.md`, Results.
+- **Fire never tells clients about its changes** (found in M3, still in upstream `master`
+  `44d881c`). `block/blocks/fire/fire.rs` sets blocks with `BlockFlags::NOTIFY_NEIGHBORS` only in
+  three places: fire that can't survive, fire put out by rain, and fire spreading. But
+  `World::on_block_state_set` only queues a client update with `NOTIFY_LISTENERS`. So clients keep
+  seeing fire that went out, and never see fire that spread. Vanilla uses flag 3 (`NOTIFY_ALL`)
+  there. pumpkin-core has seven `set_block_state` calls with `NOTIFY_NEIGHBORS` alone, worth
+  auditing together.
 
 Notes for M2 (found while planning M1) were all handled; see `docs/milestones/m2-plan.md`.
