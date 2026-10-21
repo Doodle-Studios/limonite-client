@@ -205,6 +205,14 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
     let spawned = match (spawned, session.spawn()) {
         (Ok(()), Some(spawn)) => {
             checks.push(walk_and_check(&mut session, server, &spawn));
+            if args.measure || args.stream.is_some() {
+                // These runs stay a minute or more. A host left standing
+                // with its head in terrain dies in about 10 s, and the server
+                // then ignores its input. Rising is a vertical move, so the
+                // chunks the server sends don't change.
+                info!("Rising to eye height {} for the measurements", measure::SAFE_EYE_Y);
+                session.rise_to(measure::SAFE_EYE_Y);
+            }
             // `PlayerSpawn` only means the server has queued enough chunks,
             // not that they've arrived, so wait for them before checking.
             let join_chunks = wait_for_chunks(&mut session);
@@ -212,7 +220,7 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
                 measure(&mut session, server, join_chunks);
             }
             if let Some(blocks) = args.stream {
-                measure::stream(&mut session, blocks, join_chunks);
+                measure::stream(&mut session, &server.server, blocks, join_chunks);
             }
             true
         }

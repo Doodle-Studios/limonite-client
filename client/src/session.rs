@@ -222,9 +222,18 @@ impl Session {
     /// above the terrain keeps the server from suffocating the player in a
     /// hillside.
     pub const fn fly_east(&mut self, ticks: u32, eye_y: f32) {
-        self.position.y = eye_y;
+        self.rise_to(eye_y);
         self.walk_ticks = ticks;
         self.step = FLY_STEP;
+    }
+
+    /// Reports the eyes at `eye_y` from the next tick on, x and z unchanged.
+    ///
+    /// The host has no physics: its scripted walk keeps one height, so it can
+    /// end up with its head in a hillside, where the server suffocates it.
+    /// Up in the air it can stay as long as a measurement needs.
+    pub const fn rise_to(&mut self, eye_y: f32) {
+        self.position.y = eye_y;
     }
 
     pub const fn is_walking(&self) -> bool {
