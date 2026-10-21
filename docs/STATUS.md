@@ -4,16 +4,23 @@ A living page: where the project is, how to build and run it, and what bites. Up
 milestone step lands. Architecture decisions live in `docs/PLAN.md`; this page is about progress
 and environment.
 
-_Last updated: 2026-10-20._
+_Last updated: 2026-10-21._
 
 ## Where we are
 
 - **Current milestone:** 3, the chunk map. **Planned and approved on 2026-10-20:**
-  `docs/milestones/m3-plan.md`. Execution hasn't started; begin at its Step 1.
-  - The plan includes the three checks for the deferred `Arc` decision and a decision point
-    (Step 10).
-  - It allows one deliberate non-seam fork edit: an upstream-bound speedup in
-    `pumpkin-world/src/chunk/palette.rs` (Decision 4).
+  `docs/milestones/m3-plan.md`. **In progress since 2026-10-21; Steps 1–6 have landed:**
+  - fork `limonite` `dc3a0ac` reads `UpdateBlock` on the client side;
+  - `client/src/world/` decodes `LevelChunk` and applies `UpdateBlock` into Bedrock-native
+    world state;
+  - checks "chunks decoded" and "world matches server" pass on the dev world (329 chunks) and
+    on a radius-32 world (3,725 chunks);
+  - `--map` writes the top-down map; `--measure` splits chunk cost into phases; `--radius` and
+    `--stream` are in.
+  - **Waiting for the owner at Step 7.2:** the baseline phase table. It's in the plan's
+    Results once recorded, and in `run/m3-logs/baseline-r8.log`.
+  - The plan allows one deliberate non-seam fork edit: an upstream-bound speedup in
+    `pumpkin-world/src/chunk/palette.rs` (Decision 4). Not made yet.
 - **Milestone 2 is done (2026-10-20).** Plan, results and deviations: `docs/milestones/m2-plan.md`.
 - **Pushed, both public, on 2026-10-20 with the owner's OK:**
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
