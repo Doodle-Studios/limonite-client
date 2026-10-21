@@ -9,7 +9,7 @@ use pumpkin_world::chunk::{ChunkData, palette::bedrock_water_state};
 use tracing::{error, info};
 
 use crate::{
-    session::Spawn,
+    session::{Session, Spawn},
     world::{BlockTable, chunk::Chunk},
 };
 
@@ -67,16 +67,27 @@ pub fn movement(server: &Server, spawn: &Spawn) -> Check {
 
 /// Whether every `LevelChunk` decoded, and `StartGame` said block ids are
 /// hashed, which the world's id table assumes.
-pub fn chunks_decoded(received: u32, decoded: u32, errors: u32, hashed: Option<bool>) -> Check {
+pub fn chunks_decoded(session: &Session) -> Check {
+    let received = session.level_chunks();
+    let decoded = session.chunks_decoded();
+    let errors = session.world_errors();
+    let hashed = session.ids_hashed();
     let hashed_detail = match hashed {
         Some(true) => "block ids are hashed",
         Some(false) => "block ids are NOT hashed",
         None => "no StartGame",
     };
+    let world = session.world();
+    let block_actors: usize = world.chunks().map(|chunk| chunk.block_actors.len()).sum();
     Check::new(
         "chunks decoded",
         received > 0 && decoded == received && errors == 0 && hashed == Some(true),
-        format!("{decoded} of {received} LevelChunk packets decoded, {errors} errors; {hashed_detail}"),
+        format!(
+            "{decoded} of {received} LevelChunk packets decoded, {errors} errors; \
+             {hashed_detail}; {block_actors} block actors; {} UpdateBlocks for unloaded \
+             chunks ignored",
+            world.updates_not_loaded(),
+        ),
     )
 }
 
