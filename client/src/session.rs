@@ -20,7 +20,7 @@ use pumpkin_protocol::{
     bedrock::{
         client::{
             CChunkRadiusUpdated, CDisconnect, CPlayStatus, CResourcePackStackPacket,
-            CResourcePacksInfo, CStartGame,
+            CResourcePacksInfo, CStartGame, update_block::CUpdateBlock,
         },
         server::{
             player_auth_input::{InputData, SPlayerAuthInput},
@@ -37,7 +37,12 @@ use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 use tracing::{debug, info, warn};
 
-use crate::{login, measure::Stats, packets};
+use crate::{
+    login,
+    measure::Stats,
+    packets,
+    world::{Applied, World},
+};
 
 /// One client tick, as in vanilla.
 pub const TICK: Duration = Duration::from_millis(50);
@@ -105,7 +110,17 @@ pub struct Session {
     input_tick: u64,
     /// Ticks of walking still to do.
     walk_ticks: u32,
+    /// `LevelChunk` packets received, decoded or not.
     level_chunks: u32,
+    /// The client's picture of the world, built from the packets.
+    world: World,
+    /// `LevelChunk` packets the world decoded and stored.
+    chunks_decoded: u32,
+    /// Packets the world couldn't apply.
+    world_errors: u32,
+    /// From `StartGame`: whether block network ids are hashes. Our id table
+    /// assumes they are.
+    ids_hashed: Option<bool>,
     stats: Stats,
     /// The decoded `StartGame`, kept as an encode-speed yardstick.
     start_game: Option<CStartGame>,
@@ -126,6 +141,10 @@ impl Session {
             input_tick: 0,
             walk_ticks: 0,
             level_chunks: 0,
+            world: World::new(),
+            chunks_decoded: 0,
+            world_errors: 0,
+            ids_hashed: None,
             stats: Stats::default(),
             start_game: None,
         };
@@ -150,6 +169,27 @@ impl Session {
 
     pub const fn stats(&self) -> &Stats {
         &self.stats
+    }
+
+    pub const fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub const fn chunks_decoded(&self) -> u32 {
+        self.chunks_decoded
+    }
+
+    pub const fn world_errors(&self) -> u32 {
+        self.world_errors
+    }
+
+    pub const fn ids_hashed(&self) -> Option<bool> {
+        self.ids_hashed
+    }
+
+    /// The eye position the host is reporting.
+    pub const fn position(&self) -> Vector3<f32> {
+        self.position
     }
 
     pub const fn start_game(&self) -> Option<&CStartGame> {
@@ -264,7 +304,11 @@ impl Session {
                 Ok(update) => info!("Chunk radius is {}", update.chunk_radius.0),
                 Err(err) => warn!("Bad ChunkRadiusUpdated: {err}"),
             },
-            CLevelChunk::PACKET_ID => self.level_chunks += 1,
+            CLevelChunk::PACKET_ID => {
+                self.level_chunks += 1;
+                self.apply_to_world(packet);
+            }
+            CUpdateBlock::PACKET_ID => self.apply_to_world(packet),
             CDisconnect::PACKET_ID => {
                 match self.decode::<CDisconnect>(packet) {
                     Ok(disconnect) => warn!(
@@ -288,6 +332,21 @@ impl Session {
         decoded
     }
 
+    /// Hands a packet to the world, timing the decode into the stats.
+    fn apply_to_world(&mut self, packet: &RawPacket) {
+        let start = Instant::now();
+        let applied = self.world.apply(packet);
+        self.stats.record_decode(packet.id, start.elapsed());
+        match applied {
+            Ok(Applied::Chunk { .. }) => self.chunks_decoded += 1,
+            Ok(_) => {}
+            Err(err) => {
+                self.world_errors += 1;
+                warn!("{err}");
+            }
+        }
+    }
+
     fn on_start_game(&mut self, start_game: CStartGame) {
         let spawn = Spawn {
             runtime_id: start_game.runtime_entity_id.0,
@@ -308,6 +367,10 @@ impl Session {
             spawn.eye_position.y,
             spawn.eye_position.z,
         );
+        if !start_game.blocknetwork_ids_are_hashed {
+            warn!("StartGame says block ids aren't hashed; the world's id table expects hashes");
+        }
+        self.ids_hashed = Some(start_game.blocknetwork_ids_are_hashed);
         self.position = spawn.eye_position;
         self.spawn = Some(spawn);
         self.start_game = Some(start_game);
