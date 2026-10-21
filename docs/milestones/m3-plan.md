@@ -460,8 +460,138 @@ second of flight at each radius.
 
 ## Deviations (filled in during execution)
 
-None yet.
+1. **"world matches server" re-checks chunk by chunk, not the whole world each tick.** The first
+   dev run failed with 2 differences in 329 chunks, after a single full pass of 6.24 s. That
+   pass is longer than the 2 s window, so no second pass ever ran. Both differences were blocks
+   changing while the pass ran: `grass_block` turned to `dirt`, and redstone ore went from unlit
+   to lit (both states are named `redstone_ore`). So the check now does one full pass, then
+   re-compares only the chunks that differed, each tick for 2 s. Each chunk must still equal the
+   server's exactly at one moment. Difference lines print the ids as well as the names (`72ea959`).
+2. **The server changes some blocks without telling the client** (owner's decision,
+   2026-10-21). A dev run in a fresh world failed: we had `fire` at (-257, -53, -428), the server
+   had `air`, and no `UpdateBlock` arrived in 2 s. Pumpkin's `fire.rs` sets blocks with
+   `BlockFlags::NOTIFY_NEIGHBORS` only (fire that can't survive, rain, spreading), and
+   `on_block_state_set` queues client updates only with `NOTIFY_LISTENERS`. The plan assumed every
+   change sends an update.
+   - **The fix:** a chunk that still differs after the re-checks gets a fresh encode of the
+     server's current copy, decoded with ours, for up to 5 ticks. If that equals the server, the
+     decoder is right: the positions are logged as "changed by the server without an
+     `UpdateBlock`" (WARN), and the check passes. Otherwise it fails (`5402089`).
+   - The fire bug is an upstream candidate in STATUS.md.
+3. **The decoder has a few more typed errors than the plan lists:** `BadVarInt`, `LayerCount` (not
+   1 or 2), `SubChunkOrder` (sub-chunks must be consecutive), and `PaletteLength` (zero, or longer
+   than the width can address, which also stops a corrupt length from allocating gigabytes).
+   Border-block bytes are skipped, not rejected; Pumpkin sends none.
+4. **The session gained `drain()`, and `tick()` is public.** The measurements run for longer than
+   Pumpkin's 10 s client timeout, so they tick the session between passes. The probe polls
+   `drain()` every half millisecond, which times the `UpdateBlock` more finely than a tick.
+5. **The probe needed no runtime `Handle`.** `World::set_block_state` ran on the main thread
+   without a panic, so M2's Deviation 9 stands.
+6. **`--stream` flies with the eyes at y 330, above any terrain.** The server takes the reported
+   position as it is, with no collision check, but a flight at walking height would pass through
+   hillsides. The movement flags are the walk's.
+7. **The chunk wait allows 180 s, not 60.** A radius-32 join into a fresh world is about 3,700
+   chunks of worldgen. The wait still ends after 2 s without a new chunk; the template's took
+   21 s.
+8. **Map details:** the host's red cross has a white outline, because lava is Java's "fire"
+   colour, pure red too. "Unknown ids" counts distinct ids. "chunks decoded" also reports the
+   block actors decoded and the `UpdateBlock`s ignored for unloaded chunks.
+9. **One behaviour change in the speedup, on a path that used to panic.** In `Dense` storage, a
+   stored value missing from the palette made the old `convert_be_water_network` panic
+   (`key_to_index[&value]`). The new code maps it to index 0, as the block conversion always did.
+   Every other output is byte-identical, as the oracle tests show. Such a value only comes from a
+   corrupt disk palette.
+10. **The host died in the first streaming runs, so they were rerun** (`cdfb2bd`). Radius 16 and
+    32 streamed 0 chunks during the flight, while radius 8 streamed 247.
+    - **Evidence:**
+      - the radius-32 packet table had an `SRespawn`, which Pumpkin sends when the player dies;
+      - a radius-16 debug run showed a hurt event plus a health update every 0.5 s from the
+        start, which is vanilla's in-wall damage rate;
+      - the same radius-16 run without `--measure` streamed 455 chunks.
+    - **Cause:** M2's scripted walk has no physics and keeps one height. The template run ended
+      with the host's head in a hillside, so every copy starts there, and the host dies in about
+      10 s. Radius 32 died during its 21 s join, and radius 16 during the measurement. Pumpkin
+      ignores a dead player's input.
+    - **Fix:** with `--measure` or `--stream`, the host rises to eye height 330 right after the
+      movement check. It's a vertical move, so the chunk centre and the chunks sent don't change.
+      The stream log now reports how far the server's player moved.
+    - **Comparisons stay one-variable:**
+      - before against after is `m3-baseline` against `m3-after-r8`, both unlifted, and only the
+        fork differs;
+      - the radius series is three lifted runs, and only R differs.
+11. **A radius-32 join is 3,725 chunks, not π·32² ≈ 3,217.** So the streaming estimate takes the
+    view diameter from the measured join count, as planned (d = 2√(N/π)), not from R.
+12. **The speedup stops at one commit.** C is still about 89% of the new E. The packer divides
+    by a runtime word size for each position, and `network_indices` builds a buffer per section.
+    Tightening both may cut C further (not measured), but it would be a second `palette.rs` commit, and
+    it wouldn't change the `Arc` decision, since both paths pay C. It's a follow-up in STATUS.md.
+13. **Chunks the host leaves behind go stale, as the plan expected.** After the radius-8 flight,
+    the world check passed with one WARN: at (10, 85, -36) we had `dirt`, the server
+    `grass_block`. Grass spreads with `NOTIFY_ALL`, so the server did send that change, but only
+    to players whose view holds the chunk. The host was 14 chunks away by then, and our client
+    doesn't unload chunks yet (out of scope, Decision 3). The server kept that chunk loaded near
+    spawn, so the check compared it, and the fresh encode correctly put the difference down to
+    drift.
 
 ## Results
 
-None yet.
+All numbers are from release builds (`CARGO_PROFILE_RELEASE_LTO=false
+CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`), 2026-10-21. Each run used a fresh copy of one template
+world, `run/m3-template`: seed 1794192434310962158, generated by a radius-32 run (3,725 chunks in
+21 s). Logs are in `run/m3-logs/`, which is gitignored.
+
+**Step 7: encode phases, before and after the speedup** (`--measure --radius 8`; per chunk,
+averaged over the server's 961 loaded chunks, 10 passes per phase; the join was 348 chunks):
+
+| Phase | Before (fork `dc3a0ac`) | After (fork `e251ffb`) | Speedup |
+| --- | ---: | ---: | ---: |
+| **E**: `encode_chunk` + batch wrapper | 696.0 µs | 145.2 µs | 4.8× |
+| **C**: palette conversions | 679.9 µs (98% of E) | 128.6 µs (89%) | 5.3× |
+| – blocks | 392.9 | 74.2 | 5.3× |
+| – water layer | 24.3 | 6.6 | 3.7× |
+| – biomes | 262.6 | 47.7 | 5.5× |
+| **E − C**: writing words and palettes, block actors | 16.1 µs | 16.6 µs | |
+| **D**: our decode | 21.2 µs | 21.4 µs | |
+| **S**: snapshot of the sections | 5.9 µs | 7.8 µs | |
+| `Arc` saving (E + D) − (S + C) | 31.4 µs | 30.3 µs | |
+
+- **Sections:** 13,810 homogeneous. Heterogeneous by width: 1 bit 62, 2 bits 194, 3 bits 3,609,
+  4 bits 4,913, 5 bits 389, 6 bits 87. 516 have a water layer. No section needed 8 or 16 bits, so
+  Pumpkin's `Dense` block storage never appeared.
+- **Byte-identical output:** `CLevelChunk::encode_chunk` output is unchanged, per the oracle
+  tests. A mutation that swapped the packer's z and y loops failed all four oracle tests, plus
+  Pumpkin's own water-order test.
+
+**Step 8: `ChunkData` mutation.** The probe ran in every measured run. `set_block_state` returned
+after 173–197 µs, and the shared `ChunkData` already held the stone when read straight after.
+Our world applied the matching `UpdateBlock` 14.5–60.7 ms after the call (0.3–1.2 ticks),
+depending on where in the server tick the call landed. S, the snapshot an `Arc` path would need,
+costs 6–10 µs per chunk. Finding 5 holds: a live `Arc` sees changes up to a tick before their
+packets, so the host would need a snapshot.
+
+**Step 9: join and streaming cost** (`--measure --radius R --stream 220`; the host rises to eye
+height 330 first, Deviation 10; per-chunk costs after the speedup):
+
+| R | Chunks per join | E before (696.0 µs each) | E after | D | S | C | `Arc` saving per join |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 348 | 242 ms | 51.5 ms | 7.4 ms | 2.7 ms | 45.0 ms | 11.2 ms |
+| 16 | 1,057 | 736 ms | 157.1 ms | 23.7 ms | 8.7 ms | 141.2 ms | 31.0 ms |
+| 32 | 3,725 | 2,593 ms | 568.0 ms | 82.4 ms | 37.9 ms | 486.4 ms | 126.1 ms |
+
+| R | d = 2√(N/π) | Estimate d·v/16 | Measured while flying (11.0 m/s) | Peak second | `Arc` saving per second of flight | E after per second |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | 21.0 | 14.4/s | 12.4/s | 19 | 0.40 ms (0.04% of a core) | 1.8 ms |
+| 16 | 36.7 | 25.2/s | 22.8/s | 35 | 0.67 ms (0.07%) | 3.4 ms |
+| 32 | 68.9 | 47.4/s | 43.6/s | 67 | 1.47 ms (0.15%) | 6.6 ms |
+
+- **Chunks come in bursts:** a whole new row arrives within about a second of each chunk crossing.
+  For example, radius 8 got `[0, 19, 19, 0, 19, 19, ...]` per second.
+- **The formula's accuracy:** it overestimates by 8–15%, because the row that enters is a little
+  shorter than the full diameter.
+- **What limited the rate:** movement, not the cap. The peak second reached 67 of 180.
+- **New worldgen:** the radius-32 flight needed chunks beyond the template, and generation kept
+  up; the measured rate was 92% of the estimate.
+- **Walking and sprinting**, extrapolated with d·v/16:
+  - radius 8: 5.6 and 7.4 chunks/s;
+  - radius 16: 9.9 and 12.8;
+  - radius 32: 18.5 and 24.1.

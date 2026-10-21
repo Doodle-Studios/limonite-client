@@ -17,10 +17,10 @@ _Last updated: 2026-10-21._
     on a radius-32 world (3,725 chunks);
   - `--map` writes the top-down map; `--measure` splits chunk cost into phases; `--radius` and
     `--stream` are in.
-  - **Waiting for the owner at Step 7.2:** the baseline phase table. It's in the plan's
-    Results once recorded, and in `run/m3-logs/baseline-r8.log`.
-  - The plan allows one deliberate non-seam fork edit: an upstream-bound speedup in
-    `pumpkin-world/src/chunk/palette.rs` (Decision 4). Not made yet.
+  - Step 7: fork `e251ffb` speeds up the Bedrock palette conversion, which made chunk encode
+    4.8× faster (696 → 145 µs per chunk). The output is byte-identical.
+  - Steps 8 and 9 are measured; the numbers are in the plan's Results.
+  - **Waiting for the owner at Step 10:** the `Arc` decision.
 - **Milestone 2 is done (2026-10-20).** Plan, results and deviations: `docs/milestones/m2-plan.md`.
 - **Pushed, both public, on 2026-10-20 with the owner's OK:**
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
