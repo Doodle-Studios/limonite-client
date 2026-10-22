@@ -8,8 +8,9 @@ starting any task, and treat it as the source of truth for architecture decision
 
 - **Progress and dev setup:** `docs/STATUS.md`. Read it first, and update it whenever a milestone
   step lands.
-- **Milestones 0 to 3 are done** (M3 on 2026-10-22). **Milestone 4, first pixels, is next:**
-  start it in plan mode, and read STATUS.md's "Notes for M4" first.
+- **Milestones 0 to 3 are done** (M3 on 2026-10-22). **Milestone 4, first pixels, is planned and
+  approved** (2026-10-22): `docs/milestones/m4-plan.md`. Execute it from Step 1. It needs no new
+  plan-mode round unless the real code contradicts it.
   - Both repos are public. The superproject is `Doodle-Studios/limonite-client` (`main`), and the
     fork is `Doodle-Studios/Pumpkin` (`limonite`, at `e251ffb` locally). Check STATUS.md for
     what's pushed. Ask the owner before pushing anything.
@@ -56,7 +57,9 @@ All three transports implement the `Transport` trait. The host never touches the
 ## Rules
 
 - Licence: GPL-3.0.
-- Never bundle Mojang assets or third-party packs. Vanilla assets load from the user's install.
+- Never bundle Mojang assets or third-party packs. Vanilla assets are only ever read at runtime
+  from the user's install: never copied or cached into the repo, and screenshots stay in
+  gitignored folders.
 - Never connect to public servers or Realms while testing. Embedded server and own LAN only.
 - Never attempt to decrypt Marketplace content.
 - Always update the readme regarding any info that needs to be shared.

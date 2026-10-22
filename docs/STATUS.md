@@ -8,8 +8,16 @@ _Last updated: 2026-10-22._
 
 ## Where we are
 
-- **Current milestone:** 4, first pixels. It isn't planned yet: start it in plan mode (CLAUDE.md),
-  and read "Notes for M4" below first.
+- **Current milestone:** 4, first pixels. **Planned and approved on 2026-10-22:**
+  `docs/milestones/m4-plan.md`. Execution hasn't started; begin at its Step 1.
+  - All eleven questions were answered as recommended, and the owner added four amendments,
+    folded into the plan.
+  - **What it builds:** a window (winit), a wgpu device, CPU meshes per sub-chunk and a fly
+    camera that flies the host. It also adds chunk unloading, and a `packs` crate that reads the
+    vanilla packs from the user's Bedrock install at runtime.
+  - **Fork changes:** a client-side reader for `NetworkChunkPublisherUpdate`, and one deliberate
+    non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an upstream
+    candidate.
 - **Milestone 3 is done (2026-10-22).** Plan, results and deviations: `docs/milestones/m3-plan.md`.
   The `Arc` decision is made: bytes stay (PLAN.md, "Why bytes, not structs").
 - **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22):
@@ -265,6 +273,8 @@ cargo clippy -p pumpkin-core --all-targets
 
 ## Notes for M4 (found in M3)
 
+All of these are folded into `docs/milestones/m4-plan.md`.
+
 - **Chunk unloading isn't done.** The client keeps every chunk it receives.
   - **What should drive it:** `NetworkChunkPublisherUpdate` gives the view's centre and radius,
     which says what to drop.
@@ -303,8 +313,15 @@ cargo clippy -p pumpkin-core --all-targets
 
 Notes for M3 (found in M2) were all handled; see `docs/milestones/m3-plan.md`.
 
-## Notes for M5 (found in M2)
+## Notes for M5 (found in M2, and when M4 was planned)
 
+- **Gamemode and collision** (owner, when approving M4's plan): the host's gamemode is a setting
+  (`--gamemode`), creative by default in M4.
+  - **Why creative:** M4's fly camera passes through terrain, and a survival host with its head in
+    a block suffocates.
+  - **M5 revisits the default together with collision,** once the client has physics.
+  - **Saved worlds:** the setting only applies to players without saved data. A saved host keeps
+    its own mode (m4-plan Finding 11).
 - **One server per process:** `SHOULD_STOP` and `STOP_INTERRUPT` are process globals, never
   reset. Switching worlds from a world list needs a process restart, or an upstream reset.
 - **Host identity:** replace `login::DEV_XID` with a per-install identity saved with the
