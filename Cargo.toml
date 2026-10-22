@@ -30,6 +30,13 @@ base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 # The packs crate's manifests and registry JSON. Same spec as pumpkin/Cargo.toml.
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
+# The window and the GPU (M4). wgpu runs on Vulkan, DX12 and Metal; winit owns the main thread.
+wgpu = "30.0.1"
+winit = "0.30.13"
+# Vectors and matrices for the camera.
+glam = "0.34.1"
+# Waits on wgpu's async setup on the main thread, which runs no async runtime.
+pollster = "1.0.1"
 # The map's PNG writer, and the block textures' PNG and TGA decoders. `png` is exactly
 # pumpkin-core's spec; `tga` is built into `image` and adds no package.
 image = { version = "0.25.10", default-features = false, features = ["png", "tga"] }
