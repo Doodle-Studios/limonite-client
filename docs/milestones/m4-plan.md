@@ -880,4 +880,44 @@ The questions as they were asked:
 
 ## Deviations (filled in during execution)
 
+1. **`blocks.json` merges per block, then per field** (owner's decision, 2026-10-23). The plan
+   merged it per block name, so a higher pack's entry would replace the whole entry.
+   - **The evidence:** higher vanilla packs often override a single field. `vanilla_1.21.70`
+     gives the 16 terracottas and hardened clay only `{"sound":"terracotta"}`; `vanilla_1.21.50`
+     does the same for sponge and wet sponge, `vanilla_1.19.60` for the lever, and
+     `vanilla_1.21.70` for the dead bush. Whole-entry replacement would leave those 21 blocks
+     with no textures, which the official client clearly doesn't show.
+   - **The rule now:** a higher pack's field (`textures`, `isotropic`, `sound`, ...) replaces the
+     same field below, and the fields it doesn't mention are kept. It's still PLAN.md's "merge per
+     key, higher pack wins", one level deeper.
+   - **`terrain_texture.json` stays per key:** it has 29 overrides in the stack, and none drops a
+     field.
+2. **The smallest vanilla archive with data is 307 bytes, not 443:**
+   `vanilla_1.16.200/__brarchive/textures.brarchive`, which holds a 35-byte
+   `textures_list.json`. The real-install test picks it at runtime, so nothing else changed.
+3. **The archive reader has one more typed error, `DuplicateName`.** Two entries with one name
+   would make a lookup ambiguous. None of the 1,244 archives in the install has one. Also, the
+   magic number is compared against however much of it a file has, so a short file that isn't an
+   archive is reported as one with the wrong magic, not as cut short.
+4. **The palette reader catches entries cut at a tag boundary.** `pumpkin-nbt`'s compound reader
+   ends a compound quietly when the data runs out between two of its tags, as if its End tag had
+   been there. So a cut entry would have parsed with its last properties missing.
+   - **The fix, client-side only:** `palette_source.rs` wraps the byte source in an `EndGuard`
+     that records any attempt to read past the end. A compound that really ends never makes one,
+     so the parse returns `PaletteError::Truncated`.
+   - The fork is untouched.
+5. **The shape tables cover a few more plants than Decision 5 lists, and pillars.**
+   - **Crosses also include:** mushrooms and nether fungi, roots and sprouts, the hanging vines
+     (weeping, twisting, cave vines and hanging roots), mangrove propagules, and coral plants and
+     floor fans. Java draws them all as crossed planes.
+   - **Per-state textures for crosses:** Bedrock's renderers for some plants use the face slots
+     as a bag of textures. Seagrass picks `up`, `down` or `north` by `sea_grass_type`; other
+     crosses show their north key.
+   - **Pillars:** a cube with `pillar_axis` x or z shows its `up`/`down` textures at the ends and
+     its side texture, turned a quarter where needed, along its length. Without it, fallen logs
+     would show rings on their sides.
+6. **Pumpkin can send one block that has no `blocks.json` entry:** `unknown`. Finding 6 expected
+   none. Only Java's `test_block` and `test_instance_block`, game-test blocks that worldgen never
+   places, map to it. They draw the missing texture.
+
 ## Results (filled in during execution)
