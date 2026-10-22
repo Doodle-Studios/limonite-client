@@ -20,7 +20,9 @@ use pumpkin_protocol::{
     bedrock::{
         client::{
             CChunkRadiusUpdated, CDisconnect, CPlayStatus, CResourcePackStackPacket,
-            CResourcePacksInfo, CStartGame, update_block::CUpdateBlock,
+            CResourcePacksInfo, CStartGame,
+            network_chunk_publisher_update::CNetworkChunkPublisherUpdate,
+            update_block::CUpdateBlock,
         },
         server::{
             player_auth_input::{InputData, SPlayerAuthInput},
@@ -352,7 +354,9 @@ impl Session {
                 self.level_chunks += 1;
                 self.apply_to_world(packet);
             }
-            CUpdateBlock::PACKET_ID => self.apply_to_world(packet),
+            CUpdateBlock::PACKET_ID | CNetworkChunkPublisherUpdate::PACKET_ID => {
+                self.apply_to_world(packet);
+            }
             CDisconnect::PACKET_ID => {
                 match self.decode::<CDisconnect>(packet) {
                     Ok(disconnect) => warn!(

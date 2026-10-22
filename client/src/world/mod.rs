@@ -17,7 +17,12 @@ use std::collections::{HashMap, hash_map::Entry};
 use pumpkin_core::net::bedrock::level_chunk::CLevelChunk;
 use pumpkin_data::{Block, BlockState, BlockStateId};
 use pumpkin_protocol::{
-    RawPacket, bedrock::client::update_block::CUpdateBlock, packet::Packet, serial::PacketRead,
+    RawPacket,
+    bedrock::client::{
+        network_chunk_publisher_update::CNetworkChunkPublisherUpdate, update_block::CUpdateBlock,
+    },
+    packet::Packet,
+    serial::PacketRead,
 };
 use tracing::{debug, info};
 
@@ -26,17 +31,61 @@ use self::{chunk::Chunk, level_chunk::DecodeError};
 /// Air's Bedrock network id, which a missing sub-chunk or layer reads as.
 pub const AIR: u32 = BlockState::to_be_network_id(Block::AIR.default_state.id);
 
+/// How many chunks beyond the server's published radius the world keeps.
+///
+/// Pumpkin's view isn't the circle it publishes. It takes 2 off each axis
+/// distance before testing the circle (`Cylindrical::is_within_distance`),
+/// so the view reaches r + 1 chunks along the axes and r + 2√2 ≈ r + 2.83 on
+/// the diagonals (m4-plan Finding 10). And Pumpkin never resends a chunk it
+/// believes we still have, so a chunk dropped while still in its view would
+/// stay a hole. A margin of 3 covers the whole view; a test checks it at
+/// every radius from 2 to 32.
+pub const VIEW_MARGIN: i32 = 3;
+
 /// What a packet did to the world.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applied {
     /// A chunk was decoded and stored (replacing any older copy).
     Chunk { x: i32, z: i32 },
     /// A block changed.
-    Block,
+    Block { x: i32, y: i32, z: i32 },
     /// A block update for a chunk we don't have; counted and ignored.
     BlockNotLoaded,
+    /// The server's view moved; chunks it has left were dropped.
+    View { dropped: usize },
     /// The world doesn't use this packet.
     Ignored,
+}
+
+/// A change to the world, for whoever draws it ([`World::take_changes`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Change {
+    /// A chunk arrived, new or replacing an older copy.
+    Chunk { x: i32, z: i32 },
+    /// The block at this position changed, on either layer.
+    Block { x: i32, y: i32, z: i32 },
+    /// A chunk was dropped, because the server's view left it.
+    Dropped { x: i32, z: i32 },
+}
+
+/// The server's view, from a `NetworkChunkPublisherUpdate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct View {
+    /// The chunk the view is centred on.
+    pub center: (i32, i32),
+    /// Its radius in chunks.
+    pub radius: i32,
+}
+
+impl View {
+    /// Whether a chunk is kept: within [`VIEW_MARGIN`] chunks past the
+    /// published radius of the centre, measured in a straight line.
+    #[must_use]
+    pub const fn keeps(&self, x: i32, z: i32) -> bool {
+        let (dx, dz) = ((x - self.center.0) as i64, (z - self.center.1) as i64);
+        let keep = (self.radius + VIEW_MARGIN) as i64;
+        dx * dx + dz * dz <= keep * keep
+    }
 }
 
 #[derive(Debug)]
@@ -45,6 +94,7 @@ pub enum ApplyError {
     UpdateBlock(std::io::Error),
     /// A layer other than 0 (the block) or 1 (its water).
     Layer(u32),
+    PublisherUpdate(std::io::Error),
 }
 
 impl std::fmt::Display for ApplyError {
@@ -53,6 +103,7 @@ impl std::fmt::Display for ApplyError {
             Self::Chunk(err) => write!(f, "bad LevelChunk: {err}"),
             Self::UpdateBlock(err) => write!(f, "bad UpdateBlock: {err}"),
             Self::Layer(layer) => write!(f, "UpdateBlock for layer {layer}"),
+            Self::PublisherUpdate(err) => write!(f, "bad NetworkChunkPublisherUpdate: {err}"),
         }
     }
 }
@@ -62,6 +113,9 @@ pub struct World {
     blocks: BlockTable,
     /// `UpdateBlock`s that arrived for a chunk we don't have.
     updates_not_loaded: u64,
+    /// What changed since [`World::take_changes`], when tracking. `None`
+    /// otherwise, so a world nobody draws keeps no log.
+    changes: Option<Vec<Change>>,
 }
 
 impl Default for World {
@@ -79,6 +133,26 @@ impl World {
             chunks: HashMap::new(),
             blocks,
             updates_not_loaded: 0,
+            changes: None,
+        }
+    }
+
+    /// Starts recording what changes, for [`World::take_changes`].
+    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
+    pub fn track_changes(&mut self) {
+        self.changes.get_or_insert_with(Vec::new);
+    }
+
+    /// What changed since the last call, oldest first. Empty unless
+    /// [`World::track_changes`] was called.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
+    pub fn take_changes(&mut self) -> Vec<Change> {
+        self.changes.as_mut().map(std::mem::take).unwrap_or_default()
+    }
+
+    fn record(&mut self, change: Change) {
+        if let Some(changes) = &mut self.changes {
+            changes.push(change);
         }
     }
 
@@ -93,6 +167,7 @@ impl World {
                 let chunk = level_chunk::decode(&packet.payload).map_err(ApplyError::Chunk)?;
                 let (x, z) = (chunk.x, chunk.z);
                 self.chunks.insert((x, z), chunk);
+                self.record(Change::Chunk { x, z });
                 Ok(Applied::Chunk { x, z })
             }
             CUpdateBlock::PACKET_ID => {
@@ -104,14 +179,60 @@ impl World {
                 }
                 let pos = update.block_position.0;
                 if self.set_block(pos.x, pos.y, pos.z, layer as usize, update.block_runtime_id.0) {
-                    Ok(Applied::Block)
+                    let (x, y, z) = (pos.x, pos.y, pos.z);
+                    self.record(Change::Block { x, y, z });
+                    Ok(Applied::Block { x, y, z })
                 } else {
                     self.updates_not_loaded += 1;
                     Ok(Applied::BlockNotLoaded)
                 }
             }
+            CNetworkChunkPublisherUpdate::PACKET_ID => {
+                let mut body = packet.payload.as_ref();
+                let update =
+                    CNetworkChunkPublisherUpdate::read(&mut body).map_err(ApplyError::PublisherUpdate)?;
+                let pos = update.pos_for_view.0;
+                // The radius is in blocks: the view distance times 16.
+                let radius = update.new_radius.0.div_ceil(16);
+                let view = View {
+                    center: (pos.x >> 4, pos.z >> 4),
+                    radius: i32::try_from(radius).unwrap_or(i32::MAX - VIEW_MARGIN),
+                };
+                Ok(Applied::View {
+                    dropped: self.set_view(view),
+                })
+            }
             _ => Ok(Applied::Ignored),
         }
+    }
+
+    /// Follows the server's view: drops every chunk it no longer keeps, and
+    /// returns how many. A chunk that arrives later is kept until the next
+    /// update, since the server only sends chunks inside its view.
+    fn set_view(&mut self, view: View) -> usize {
+        let before = self.chunks.len();
+        let mut dropped = Vec::new();
+        self.chunks.retain(|&(x, z), _| {
+            let keep = view.keeps(x, z);
+            if !keep {
+                dropped.push((x, z));
+            }
+            keep
+        });
+        for &(x, z) in &dropped {
+            self.record(Change::Dropped { x, z });
+        }
+        if !dropped.is_empty() {
+            debug!(
+                "View at chunk ({}, {}), radius {}: dropped {} of {} chunks",
+                view.center.0,
+                view.center.1,
+                view.radius,
+                dropped.len(),
+                before,
+            );
+        }
+        dropped.len()
     }
 
     /// Sets a block by world position. Returns false if its chunk (or its
