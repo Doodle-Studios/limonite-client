@@ -1612,6 +1612,7 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "image",
+ "limonite-packs",
  "pumpkin-auth",
  "pumpkin-config",
  "pumpkin-core",
