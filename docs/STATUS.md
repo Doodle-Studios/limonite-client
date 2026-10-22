@@ -12,13 +12,12 @@ _Last updated: 2026-10-22._
   and read "Notes for M4" below first.
 - **Milestone 3 is done (2026-10-22).** Plan, results and deviations: `docs/milestones/m3-plan.md`.
   The `Arc` decision is made: bytes stay (PLAN.md, "Why bytes, not structs").
-- **Pushed, both public, on 2026-10-20 with the owner's OK:**
+- **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22):
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
     tracks `origin/main`);
-  - the fork's `limonite` branch, at `03b498c`, with the M1 and M2 fork commits. It tracks
+  - the fork's `limonite` branch, at `e251ffb`, with the M1, M2 and M3 fork commits. It tracks
     `origin/limonite`.
-- **Not pushed yet:** M3's two fork commits (`limonite` at `e251ffb`) and its superproject
-  commits.
+- **No upstream PR is open.** The candidates are listed under "Upstream PR candidates".
 
   Ask the owner before pushing anything, and before opening an upstream PR.
 - **Fork location:** the owner moved the fork to `Doodle-Studios/Pumpkin`. `.gitmodules` and
@@ -31,7 +30,7 @@ _Last updated: 2026-10-22._
 | 0. Recon | Official Bedrock 1.26.52 joined stock Pumpkin (fork at `aac0a82`) over NetherNet; note in `docs/recon/m0-pumpkin-bedrock.md`; PLAN.md corrected | `main`: `baa0cf0` scaffold, `dab65f0` recon note, `c2d9df1` PLAN.md corrections |
 | 1. Workspace + fork seam | Cargo workspace with `client/`; fork as a submodule; `Transport` trait with NetherNet behind it; Java listener behind `java-listener`; `tracing` in the client. Bedrock 1.26.52 joined a `--no-default-features` server at `80b19bb` with `java.enabled = true` and no TCP 25565 listener | `main`: `1b6b2ad` plan, `ae0bcbe` workspace, `c1feeb2` submodule, `4ec46ac` tracing, `59fd378` profile cleanup, `83b63a9` bump. Fork `limonite`: `df1f8e524` Transport, `80b19bb9b` java-listener |
 | 2. Headless embedded client | The client runs Pumpkin on a background thread and joins it as the host over an in-memory `LocalChannel`: unsigned-token login, spawn, 329 chunks, an 8-block walk the server saw (7.8), and no socket owned by the process. Client codecs in `pumpkin-protocol` behind `client`, golden-tested byte for byte against official-client captures. NetherNet regression join passed. `LocalChannel` cost measured; chunks dominate, and the `Arc` decision is deferred to M3's planning | `main`: `ebc85a9` plan, `4d67904` bump + deps, `65114e0` embedded server, `283ee14` login and spawn, `1c2a6ab` walk + check, `a107aeb` measure, `679a421` bump, `7a69f6f` block-actor timing, `4b32b93` packet names, then the tick. Fork `limonite`: `de0f7cedc` accept_bedrock, `7c1fa8063` LocalChannel, `85f58b5f6` client codecs, `03b498c47` NBT test fix |
-| 3. Chunk map | The client decodes every `LevelChunk` into Bedrock-native world state and applies `UpdateBlock`. The decoded world equals the server's `ChunkData` block for block on both layers, and biome for biome: 329 chunks in the dev world, 3,725 at radius 32. `--map` writes a top-down map, which the owner judged a match for Bedrock 1.26.52 at the same seed and position (stock fork server over NetherNet, also the regression join). The fork's palette conversion is 4.8× faster (encode 696 → 145 µs per chunk), byte-identical. The `Arc` decision: bytes stay | Not pushed yet. `main`: `9b46385` plan, `0a5d84a` bump + deps, `cd8844f` decoder, `72ea959` world check, `5b6dd8c` map, `49def42` measure, `5aa5108` progress, `5402089` drift vs decoder bug, `fbbd472` bump, `cdfb2bd` keep the host alive, `fac65e2` results, `9068f3a` Arc decision, then the tick. Fork `limonite`: `dc3a0ac2e` UpdateBlock reader, `e251ffbda` palette speedup |
+| 3. Chunk map | The client decodes every `LevelChunk` into Bedrock-native world state and applies `UpdateBlock`. The decoded world equals the server's `ChunkData` block for block on both layers, and biome for biome: 329 chunks in the dev world, 3,725 at radius 32. `--map` writes a top-down map, which the owner judged a match for Bedrock 1.26.52 at the same seed and position (stock fork server over NetherNet, also the regression join). The fork's palette conversion is 4.8× faster (encode 696 → 145 µs per chunk), byte-identical. The `Arc` decision: bytes stay | `main`: `9b46385` plan, `0a5d84a` bump + deps, `cd8844f` decoder, `72ea959` world check, `5b6dd8c` map, `49def42` measure, `5aa5108` progress, `5402089` drift vs decoder bug, `fbbd472` bump, `cdfb2bd` keep the host alive, `fac65e2` results, `9068f3a` Arc decision, then the tick. Fork `limonite`: `dc3a0ac2e` UpdateBlock reader, `e251ffbda` palette speedup |
 
 Key facts from M0 (details in the recon note, which is required reading before touching the fork):
 - **Transport:** upstream Bedrock is **NetherNet** (WebRTC), not RakNet.
