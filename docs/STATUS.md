@@ -4,20 +4,31 @@ A living page: where the project is, how to build and run it, and what bites. Up
 milestone step lands. Architecture decisions live in `docs/PLAN.md`; this page is about progress
 and environment.
 
-_Last updated: 2026-10-22._
+_Last updated: 2026-10-23._
 
 ## Where we are
 
 - **Current milestone:** 4, first pixels. **Planned and approved on 2026-10-22:**
-  `docs/milestones/m4-plan.md`. Execution hasn't started; begin at its Step 1.
-  - All eleven questions were answered as recommended, and the owner added four amendments,
-    folded into the plan.
+  `docs/milestones/m4-plan.md`. **In progress: Steps 1 to 6 are done; next is Step 7** (chunk
+  unloading).
   - **What it builds:** a window (winit), a wgpu device, CPU meshes per sub-chunk and a fly
     camera that flies the host. It also adds chunk unloading, and a `packs` crate that reads the
     vanilla packs from the user's Bedrock install at runtime.
+  - **Done so far** (commits on `main`, nothing pushed):
+    - Steps 1 and 2: the fork's `NetworkChunkPublisherUpdate` reader (`1082621`) and
+      `Weather::downfall()` (`443b954`), bumped in `9337913`.
+    - Step 3, `657a8b1`: the `packs` crate, a layered VFS over folder packs and `__brarchive`
+      archives.
+    - Step 4, `8c52765`: `--headless` for the scripted session; the default path finds the
+      install and loads the vanilla stack.
+    - Step 5, `33be32f`: Bedrock block names from the fork's block palette.
+    - Step 6, `08ce0c0`: block appearance, the texture array's CPU half, and biome tints.
+  - **One owner decision so far** (2026-10-23): `blocks.json` merges per block, then per field
+    (m4-plan Deviation 1).
   - **Fork changes:** a client-side reader for `NetworkChunkPublisherUpdate`, and one deliberate
     non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an upstream
-    candidate.
+    candidate. The fork's `limonite` branch is at `443b954`, two commits ahead of
+    `origin/limonite`.
 - **Milestone 3 is done (2026-10-22).** Plan, results and deviations: `docs/milestones/m3-plan.md`.
   The `Arc` decision is made: bytes stay (PLAN.md, "Why bytes, not structs").
 - **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22):
