@@ -25,6 +25,8 @@ pumpkin-util = { path = "../pumpkin/crates/pumpkin-util" }
 pumpkin-data = { path = "../pumpkin/crates/pumpkin-data" }
 # Chunks carry their block actors (chests, signs, ...) as NBT.
 pumpkin-nbt = { path = "../pumpkin/crates/pumpkin-nbt" }
+# The vanilla resource packs, read from the user's Bedrock install.
+limonite-packs = { path = "../packs" }
 
 tracing.workspace = true
 tracing-subscriber.workspace = true

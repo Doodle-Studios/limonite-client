@@ -1,5 +1,6 @@
 mod checks;
 mod embedded;
+mod install;
 mod login;
 mod map;
 mod measure;
@@ -27,8 +28,10 @@ use crate::{
     world::World,
 };
 
-const USAGE: &str = "usage: limonite-client [--data-dir <path>] [--name <name>] \
-                     [--linger <seconds>] [--measure] [--map <path.png>] [--radius <chunks>] \
+const USAGE: &str = "usage: limonite-client [--bedrock <path>] [--data-dir <path>] [--name <name>] \
+                     [--radius <chunks>]\n       \
+                     limonite-client --headless [--data-dir <path>] [--name <name>] \
+                     [--radius <chunks>] [--linger <seconds>] [--measure] [--map <path.png>] \
                      [--stream <blocks>]";
 
 /// The view distance asked for without `--radius`, in chunks.
@@ -55,6 +58,12 @@ const FRESH_DECODE_ATTEMPTS: u32 = 5;
 
 /// Command-line options. Every path is absolute by the time parsing returns.
 struct Args {
+    /// Run the scripted session and its checks instead of opening a window.
+    /// It needs no GPU and no Bedrock install, so it stays the regression
+    /// suite.
+    headless: bool,
+    /// The Bedrock install: the folder that holds `data/resource_packs`.
+    bedrock: Option<PathBuf>,
     /// Where the embedded server keeps its world and data files.
     data_dir: PathBuf,
     /// The host's display name.
@@ -74,6 +83,8 @@ struct Args {
 
 impl Args {
     fn parse(mut args: impl Iterator<Item = String>) -> Result<Self, String> {
+        let mut headless = false;
+        let mut bedrock = None;
         let mut data_dir = PathBuf::from("run/client");
         let mut name = "Limonite".to_string();
         let mut linger = Duration::ZERO;
@@ -81,8 +92,17 @@ impl Args {
         let mut map = None;
         let mut radius = DEFAULT_RADIUS;
         let mut stream = None;
+        // The scripted session's flags, which mean nothing to the window.
+        let mut headless_only = Vec::new();
         while let Some(arg) = args.next() {
+            if matches!(arg.as_str(), "--linger" | "--measure" | "--map" | "--stream") {
+                headless_only.push(arg.clone());
+            }
             match arg.as_str() {
+                "--headless" => headless = true,
+                "--bedrock" => {
+                    bedrock = Some(PathBuf::from(args.next().ok_or("--bedrock needs a path")?));
+                }
                 "--data-dir" => {
                     data_dir = args.next().ok_or("--data-dir needs a path")?.into();
                 }
@@ -115,12 +135,20 @@ impl Args {
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
+        if !headless && !headless_only.is_empty() {
+            return Err(format!(
+                "the scripted session's flags need --headless: {}",
+                headless_only.join(", ")
+            ));
+        }
         // Resolve now, against the directory we were started in: the working
         // directory changes later, and a relative path would change meaning.
         let absolute = |path: &Path| {
             std::path::absolute(path).map_err(|err| format!("can't resolve {}: {err}", path.display()))
         };
         Ok(Self {
+            headless,
+            bedrock: bedrock.as_deref().map(absolute).transpose()?,
             data_dir: absolute(&data_dir)?,
             name,
             linger,
@@ -155,6 +183,38 @@ fn main() -> ExitCode {
         }
     };
 
+    if args.headless {
+        if args.bedrock.is_some() {
+            warn!("--bedrock is unused: the scripted session reads no assets");
+        }
+        headless(&args)
+    } else {
+        windowed(&args)
+    }
+}
+
+/// The default path, which becomes the window.
+///
+/// So far it loads the assets, logs what it found, and exits. The assets
+/// come first, before the server starts, so a missing install fails at once.
+fn windowed(args: &Args) -> ExitCode {
+    let install = match install::find(args.bedrock.as_deref()) {
+        Ok(install) => install,
+        Err(err) => {
+            error!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(err) = install::load_vanilla(&install) {
+        error!("Couldn't load the vanilla packs: {err}");
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
+/// The scripted session (`--headless`): the M2 and M3 acceptance run, which
+/// needs no GPU and no Bedrock install.
+fn headless(args: &Args) -> ExitCode {
     set_up_process();
 
     if let Err(err) = enter_data_dir(&args.data_dir) {
@@ -174,7 +234,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let result = play(&server, &args);
+    let result = play(&server, args);
     server.stop();
     result
 }
