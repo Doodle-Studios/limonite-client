@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["client"]
+members = ["client", "packs"]
 # The fork is its own workspace. Without this, Cargo would make every Pumpkin crate the client
 # depends on by path a member of ours, and their `*.workspace = true` fields would resolve here.
 exclude = ["pumpkin"]
@@ -28,6 +28,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 bytes = { version = "1.12", default-features = false, features = ["std"] }
 base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
+# The packs crate's manifests and registry JSON. Same spec as pumpkin/Cargo.toml.
+serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 # The map's PNG writer. Exactly pumpkin-core's spec, so it adds no new package or feature.
 image = { version = "0.25.10", default-features = false, features = ["png"] }
 
