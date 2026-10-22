@@ -32,7 +32,6 @@ pub struct BedrockState {
     pub states: Box<[(Arc<str>, StateValue)]>,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "M4 Step 6's appearance table reads them"))]
 impl BedrockState {
     /// A property's value. The properties are sorted, so this is a binary
     /// search.
@@ -89,14 +88,12 @@ impl Palette {
     }
 
     /// The state with this network id, or `None` if Bedrock has no such id.
-    #[cfg_attr(not(test), expect(dead_code, reason = "M4 Step 6's appearance table reads it"))]
     #[must_use]
     pub fn state(&self, id: u32) -> Option<&BedrockState> {
         self.states.get(&id)
     }
 
     /// Every (network id, state), in no particular order.
-    #[expect(dead_code, reason = "M4 Step 6's appearance table reads it")]
     pub fn iter(&self) -> impl Iterator<Item = (u32, &BedrockState)> {
         self.states.iter().map(|(&id, state)| (id, state))
     }

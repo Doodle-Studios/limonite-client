@@ -6,7 +6,10 @@ mod login;
 mod map;
 mod measure;
 mod packets;
+mod render;
 mod session;
+#[cfg(test)]
+mod test_util;
 mod world;
 
 use std::{
@@ -206,14 +209,22 @@ fn windowed(args: &Args) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    if let Err(err) = install::load_vanilla(&install) {
-        error!("Couldn't load the vanilla packs: {err}");
-        return ExitCode::FAILURE;
-    }
-    if let Err(err) = blocks::load_palette() {
-        error!("{err}");
-        return ExitCode::FAILURE;
-    }
+    let vanilla = match install::load_vanilla(&install) {
+        Ok(vanilla) => vanilla,
+        Err(err) => {
+            error!("Couldn't load the vanilla packs: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let palette = match blocks::load_palette() {
+        Ok(palette) => palette,
+        Err(err) => {
+            error!("{err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let _looks = blocks::build_appearance(&palette, &vanilla);
+    let _tints = render::load_tints(&vanilla.stack);
     ExitCode::SUCCESS
 }
 
