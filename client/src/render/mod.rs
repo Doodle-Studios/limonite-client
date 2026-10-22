@@ -1,6 +1,7 @@
 //! The renderer. So far, its CPU half: the block texture array and the biome
 //! tints.
 
+pub mod mesher;
 pub mod textures;
 pub mod tint;
 

@@ -56,6 +56,32 @@ impl Storage {
         }
     }
 
+    /// The distinct values: what [`Storage::palette_index`] indexes.
+    ///
+    /// With [`Storage::palette_index`], a reader that visits every position,
+    /// like the mesher, can translate each palette entry once instead of
+    /// each of the 4,096 values.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the mesher reads it, from M4 Step 10"))]
+    #[must_use]
+    pub fn palette(&self) -> &[u32] {
+        match self {
+            Self::Single(value) => std::slice::from_ref(value),
+            Self::Packed { palette, .. } => palette,
+        }
+    }
+
+    /// The palette index at `(x, y, z)`, each below 16. Always in range of
+    /// [`Storage::palette`]: every index was checked when the storage was
+    /// read.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the mesher reads it, from M4 Step 10"))]
+    #[must_use]
+    pub fn palette_index(&self, x: usize, y: usize, z: usize) -> usize {
+        match self {
+            Self::Single(_) => 0,
+            Self::Packed { bits, words, .. } => packed_index(*bits, words, index(x, y, z)),
+        }
+    }
+
     /// Sets `(x, y, z)` to `value`, growing the palette, and repacking at the
     /// next width when the palette outgrows the current one.
     ///
