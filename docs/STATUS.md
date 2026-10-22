@@ -4,41 +4,34 @@ A living page: where the project is, how to build and run it, and what bites. Up
 milestone step lands. Architecture decisions live in `docs/PLAN.md`; this page is about progress
 and environment.
 
-_Last updated: 2026-10-21._
+_Last updated: 2026-10-22._
 
 ## Where we are
 
-- **Current milestone:** 3, the chunk map. **Planned and approved on 2026-10-20:**
-  `docs/milestones/m3-plan.md`. **In progress since 2026-10-21; Steps 1–6 have landed:**
-  - fork `limonite` `dc3a0ac` reads `UpdateBlock` on the client side;
-  - `client/src/world/` decodes `LevelChunk` and applies `UpdateBlock` into Bedrock-native
-    world state;
-  - checks "chunks decoded" and "world matches server" pass on the dev world (329 chunks) and
-    on a radius-32 world (3,725 chunks);
-  - `--map` writes the top-down map; `--measure` splits chunk cost into phases; `--radius` and
-    `--stream` are in.
-  - Step 7: fork `e251ffb` speeds up the Bedrock palette conversion, which made chunk encode
-    4.8× faster (696 → 145 µs per chunk). The output is byte-identical.
-  - Steps 8 and 9 are measured; the numbers are in the plan's Results.
-  - **Waiting for the owner at Step 10:** the `Arc` decision.
-- **Milestone 2 is done (2026-10-20).** Plan, results and deviations: `docs/milestones/m2-plan.md`.
+- **Current milestone:** 4, first pixels. It isn't planned yet: start it in plan mode (CLAUDE.md),
+  and read "Notes for M4" below first.
+- **Milestone 3 is done (2026-10-22).** Plan, results and deviations: `docs/milestones/m3-plan.md`.
+  The `Arc` decision is made: bytes stay (PLAN.md, "Why bytes, not structs").
 - **Pushed, both public, on 2026-10-20 with the owner's OK:**
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
     tracks `origin/main`);
   - the fork's `limonite` branch, at `03b498c`, with the M1 and M2 fork commits. It tracks
     `origin/limonite`.
+- **Not pushed yet:** M3's two fork commits (`limonite` at `e251ffb`) and its superproject
+  commits.
 
-  Ask the owner before pushing anything.
+  Ask the owner before pushing anything, and before opening an upstream PR.
 - **Fork location:** the owner moved the fork to `Doodle-Studios/Pumpkin`. `.gitmodules` and
   `origin` point there. The old `LaDoodleInTheHat/Pumpkin` URL redirects, but don't use it.
 
 ## Done
 
-| Milestone | Result | Commits (all pushed) |
+| Milestone | Result | Commits |
 | --- | --- | --- |
 | 0. Recon | Official Bedrock 1.26.52 joined stock Pumpkin (fork at `aac0a82`) over NetherNet; note in `docs/recon/m0-pumpkin-bedrock.md`; PLAN.md corrected | `main`: `baa0cf0` scaffold, `dab65f0` recon note, `c2d9df1` PLAN.md corrections |
 | 1. Workspace + fork seam | Cargo workspace with `client/`; fork as a submodule; `Transport` trait with NetherNet behind it; Java listener behind `java-listener`; `tracing` in the client. Bedrock 1.26.52 joined a `--no-default-features` server at `80b19bb` with `java.enabled = true` and no TCP 25565 listener | `main`: `1b6b2ad` plan, `ae0bcbe` workspace, `c1feeb2` submodule, `4ec46ac` tracing, `59fd378` profile cleanup, `83b63a9` bump. Fork `limonite`: `df1f8e524` Transport, `80b19bb9b` java-listener |
 | 2. Headless embedded client | The client runs Pumpkin on a background thread and joins it as the host over an in-memory `LocalChannel`: unsigned-token login, spawn, 329 chunks, an 8-block walk the server saw (7.8), and no socket owned by the process. Client codecs in `pumpkin-protocol` behind `client`, golden-tested byte for byte against official-client captures. NetherNet regression join passed. `LocalChannel` cost measured; chunks dominate, and the `Arc` decision is deferred to M3's planning | `main`: `ebc85a9` plan, `4d67904` bump + deps, `65114e0` embedded server, `283ee14` login and spawn, `1c2a6ab` walk + check, `a107aeb` measure, `679a421` bump, `7a69f6f` block-actor timing, `4b32b93` packet names, then the tick. Fork `limonite`: `de0f7cedc` accept_bedrock, `7c1fa8063` LocalChannel, `85f58b5f6` client codecs, `03b498c47` NBT test fix |
+| 3. Chunk map | The client decodes every `LevelChunk` into Bedrock-native world state and applies `UpdateBlock`. The decoded world equals the server's `ChunkData` block for block on both layers, and biome for biome: 329 chunks in the dev world, 3,725 at radius 32. `--map` writes a top-down map, which the owner judged a match for Bedrock 1.26.52 at the same seed and position (stock fork server over NetherNet, also the regression join). The fork's palette conversion is 4.8× faster (encode 696 → 145 µs per chunk), byte-identical. The `Arc` decision: bytes stay | Not pushed yet. `main`: `9b46385` plan, `0a5d84a` bump + deps, `cd8844f` decoder, `72ea959` world check, `5b6dd8c` map, `49def42` measure, `5aa5108` progress, `5402089` drift vs decoder bug, `fbbd472` bump, `cdfb2bd` keep the host alive, `fac65e2` results, `9068f3a` Arc decision, then the tick. Fork `limonite`: `dc3a0ac2e` UpdateBlock reader, `e251ffbda` palette speedup |
 
 Key facts from M0 (details in the recon note, which is required reading before touching the fork):
 - **Transport:** upstream Bedrock is **NetherNet** (WebRTC), not RakNet.
@@ -78,6 +71,27 @@ Key facts from M2 (details, results and deviations in `docs/milestones/m2-plan.m
     `run/captures/slogin.bin` (gitignored).
   - Raw captures are in `run/captures/m2-official/`.
 
+Key facts from M3 (details, results and deviations in `docs/milestones/m3-plan.md`):
+- **New client modules:**
+  - `world/` holds the world state: `storage.rs` (one palette storage), `chunk.rs`,
+    `level_chunk.rs` (the decoder and its typed errors), and `mod.rs` (`World`, the block table).
+  - `map.rs` draws the map.
+- **The world check:** "world matches server" compares through independent code on each side.
+  After one full pass it re-checks the chunks that differed. If a chunk still differs, a fresh
+  encode of the server's copy tells server drift apart from a decoder bug.
+- **The fork:** two commits in M3.
+  - `dc3a0ac` derives a `CUpdateBlock` reader behind `client`.
+  - `e251ffb` speeds up the palette conversion, touching only `palette.rs`, with the old code kept
+    as a test oracle.
+  - The fork diff is 34 files against `aac0a82`.
+- **Measurements** (release; chunk cost in phases):
+  - E, the encode: 145 µs per chunk;
+  - C, the palette conversion: 130 µs;
+  - D, our decode: 21 µs;
+  - S, a snapshot: 8 µs.
+  - A radius-32 join is 3,725 chunks in about 21 s.
+- **Pumpkin bug:** its fire never tells clients about some changes (Upstream PR candidates).
+
 ## Dev environment
 
 Windows 11, with Git Bash and PowerShell both used.
@@ -99,26 +113,42 @@ Windows 11, with Git Bash and PowerShell both used.
 **Build and run the client** (run at the repo root):
 
 ```bash
-RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --linger 30
+RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --map run/m3/map.png
 ```
 
-- **What it does:** starts the embedded server, joins as the host, walks 8 blocks east, then
-  logs one `PASS`/`FAIL` line each for spawn, movement and chunks. The exit code is non-zero
-  on any failure.
-- **Debug logging:** `limonite_client=debug` logs every packet name received.
+- **What it does:**
+  1. Starts the embedded server and joins as the host.
+  2. Walks 8 blocks east, then waits for the join's chunks.
+  3. Logs one `PASS`/`FAIL` line each for spawn, movement, chunks, chunks decoded, and world
+     matches server.
+  4. Writes the map, if asked.
+
+  The exit code is non-zero on any failure.
+- **Debug logging:** `limonite_client=debug` logs every packet name received, and the world
+  check's first-pass differences.
 - **Flags:**
   - `--data-dir <path>`: default `run/client`, gitignored. The client changes into it, because
     Pumpkin writes its world there.
   - `--name <name>`: the host's display name, default `Limonite`.
   - `--linger <secs>`: stay in-world afterwards, for outside inspection; it logs the process id.
-  - `--measure`: the cost table. Only meaningful in a release build:
+  - `--map <path.png>`: a top-down map of the loaded chunks, written after the checks.
+  - `--radius <chunks>`: the view distance to ask for, 2 to 32 (default 8). The embedded server
+    allows up to 32.
+  - `--stream <blocks>`: after the join, fly that many blocks east and log how chunks stream.
+  - `--measure`: the cost table, chunk cost in phases, and the block-change probe. Only
+    meaningful in a release build:
 
     ```bash
     CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo run --release -p limonite-client -- --measure
     ```
 
-- **Run time:** a dev run takes about 5 s plus the linger. The dev build is fast enough: on a
-  fresh world, `StartGame` came 1.85 s after the resource packs.
+    With `--measure` or `--stream`, the host rises to eye height 330 first (Gotchas, "The host
+    has no physics").
+  - **Repeatable measurements:** run each on a fresh copy of one template world (`--data-dir
+    run/m3-<label>`), as M3 did.
+- **Run time:** a dev run takes about 25 s plus the linger. The world check's full pass is about
+  6 s in a dev build and under 1 s in release at radius 8. On a fresh world, `StartGame` came
+  1.85 s after the resource packs.
 - **First builds:** about 3 minutes for dev, and 5 for release with the env vars. They compile
   `pumpkin-core` into the root `target/`, separate from `pumpkin/target/`.
 - **Socket check** while it lingers, in PowerShell:
@@ -222,31 +252,57 @@ cargo clippy -p pumpkin-core --all-targets
 - **Firewall:** Pumpkin binds `0.0.0.0`, so Windows Firewall may prompt. Allow it on Private
   networks only, or cancel; loopback works either way.
 - **Untracked on purpose:** `.idea/` (RustRover) and `.claude/settings.local.json`.
+- **The host has no physics.** The scripted walk keeps one height, so it can walk into a hillside.
+  - **What happens:** the server suffocates the host: a hurt event every 0.5 s, dead in about
+    10 s. Pumpkin then ignores the dead player's input, so it "stops moving".
+  - **Why it carries over:** the dev world saves the host's position, so a later run can start
+    inside terrain.
+  - **Measured runs:** with `--measure` or `--stream`, the host rises to eye height 330 first.
+  - **If acceptance runs start failing this way,** delete `run/client/` for a fresh world.
+- **Pumpkin's log file keeps INFO only.** `logs/latest.log` in the server's directory has no
+  debug lines, e.g. `Accepted Bedrock NetherNet connection`. Read those in the console.
+- **Some block changes never reach clients.** Pumpkin's fire uses `NOTIFY_NEIGHBORS` alone
+  (Upstream PR candidates). The world check tells that kind of drift apart from a decoder bug.
 
-## Notes for M3 (found in M2)
+## Notes for M4 (found in M3)
 
-All of these are folded into `docs/milestones/m3-plan.md`.
+- **Chunk unloading isn't done.** The client keeps every chunk it receives.
+  - **What should drive it:** `NetworkChunkPublisherUpdate` gives the view's centre and radius,
+    which says what to drop.
+  - **Why it matters:** chunks left behind go stale. The server only sends block updates for
+    chunks inside a player's view (m3-plan Deviation 13).
+- **The world-state API** (`client/src/world/`):
+  - **The world:** `World::apply(&RawPacket)` takes `LevelChunk` and `UpdateBlock`.
+    `World::chunk(x, z)` and `World::chunks()` read it.
+  - **A chunk:** `Chunk::block(x, y, z, layer)` and `Chunk::biome(x, y, z)` take x and z within
+    the chunk and an absolute y. A missing sub-chunk or layer reads as air.
+  - **Sub-chunks:** `Chunk::sub_chunks[i].layers` holds the `Storage`s. `Storage::get` does no
+    per-read check, because indices are checked once at decode.
+  - **For a mesher:** walk the sub-chunks directly and skip all-air ones
+    (`Storage::Single(AIR)` on every layer), as `map.rs` does.
+- **Map colours are Java's** (`Block::map_color`), reached through the Bedrock-to-Java table. Fine
+  for the map, not for rendering.
+- **Textures will need Bedrock block names.** The world holds Bedrock network ids, which are
+  hashes (`StartGame` says so). Vanilla Bedrock textures are keyed by Bedrock block names and
+  states, but `pumpkin-data` only maps Java states to Bedrock ids. M4 needs a Bedrock id →
+  Bedrock name-and-states table; plan where it comes from without bundling Mojang data.
+- **The Bedrock-to-Java table isn't a true inverse.** It has 15,953 Bedrock ids for 35,723 Java
+  states: 19,770 Java states share an id with a lower one, and the lowest Java state wins. Use it
+  only for log names and map colours.
+- **Decode runs on the main thread:** about 21 µs per chunk measured in a loop, and 32 µs in the
+  live session. That's about 6 ms per second during a radius-32 join (at most 180 chunks a
+  second), and about 1.4 ms per second flying at radius 32.
+- **Streaming numbers** (release, flying at 11 m/s):
+  - **measured:** 12, 23 and 44 chunks a second at radius 8, 16 and 32;
+  - **walking**, extrapolated: 6, 10 and 19.
+  - **The shape:** chunks come in bursts, about a row within a second of each chunk crossing.
+  - **The model:** the rate is about d·v/16 (8–15% high). The 9-per-tick cap was never reached.
+- **Spawn and chunks race:** `PlayStatus::PlayerSpawn` can arrive before any `LevelChunk`. The
+  client waits for chunks to stop arriving before its checks.
+- **No light data** comes with chunks (M0). Plan M4's first pixels as unlit or full-bright;
+  lighting is M5.
 
-- **Chunk layout:** `CLevelChunk::encode_chunk` (`net/bedrock/level_chunk.rs:68`) writes the
-  layout M3 decodes, summarised in recon §8. M2 only counts `LevelChunk` packets.
-- **Where the decoder lives:** if it needs Pumpkin types that only Pumpkin's own module can
-  build, follow the `client_codecs` pattern. Otherwise the client crate is fine.
-- **The `Arc` decision is deferred to M3's planning** (owner, 2026-10-20). Plan these three
-  checks before deciding (PLAN.md, "Why bytes, not structs"):
-  1. **Profile `encode_chunk`** (about 850 µs per 22 KB chunk in release), and look for a cheap
-     speedup that could go upstream first. `convert_be_network`, the palette conversion, is the
-     first suspect.
-  2. **Check how Pumpkin mutates `ChunkData`.** Would a client holding a live `Arc` see a block
-     change before the matching block-update packet arrives? If so, it would need a clone anyway.
-  3. **Estimate the join and streaming costs** (moving through new chunks) at render distances 8,
-     16 and 32, not just one join at 8.
-- **Finish the measurement:** time chunk *decode* per chunk; that's the other half of what
-  `Arc` would save.
-- **Spawn and chunks race:** `PlayStatus::PlayerSpawn` can arrive before any `LevelChunk`.
-  Don't treat "spawned" as "chunks loaded".
-- **Batches:** each one holds exactly one packet; the outgoing task sends packets one by one.
-- **Packet names:** the name table lists every clientbound packet. Unknown ids log as
-  `Unknown(n)`, so a new one shows up in the debug log.
+Notes for M3 (found in M2) were all handled; see `docs/milestones/m3-plan.md`.
 
 ## Notes for M5 (found in M2)
 
@@ -282,5 +338,8 @@ All of these are folded into `docs/milestones/m3-plan.md`.
   seeing fire that went out, and never see fire that spread. Vanilla uses flag 3 (`NOTIFY_ALL`)
   there. pumpkin-core has seven `set_block_state` calls with `NOTIFY_NEIGHBORS` alone, worth
   auditing together.
+- **A second encode step, not tried yet** (m3-plan Deviation 12). The palette conversion is still
+  about 89% of the faster encode: the packer divides by a runtime word size for each position,
+  and `network_indices` builds a buffer per section. Measure it before proposing anything.
 
 Notes for M2 (found while planning M1) were all handled; see `docs/milestones/m2-plan.md`.

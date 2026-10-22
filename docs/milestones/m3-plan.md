@@ -1,7 +1,9 @@
 # Milestone 3 plan: Chunk map
 
-**Status:** approved by the owner on 2026-10-20. "Deviations" and "Results" are filled in as the
-work goes. The owner asked for three changes at approval, all folded in below:
+**Status:** approved by the owner on 2026-10-20, and **done on 2026-10-22**. Every acceptance
+check passed, and the owner judged the map a match for the official client. "Deviations" and
+"Results" record what happened. The owner asked for three changes at approval, all folded in
+below:
 - the world copy for the official-client comparison is taken only after a clean exit (Step 11.4);
 - the reverse id table is deterministic, and its collisions are counted, logged, and noted in
   STATUS.md (Step 3);
@@ -532,6 +534,17 @@ second of flight at each radius.
     doesn't unload chunks yet (out of scope, Decision 3). The server kept that chunk loaded near
     spawn, so the check compared it, and the fresh encode correctly put the difference down to
     drift.
+14. **The `Arc` rule was restated per second when deciding** (owner, 2026-10-21). Step 10
+    proposed "50 ms per join or 5% of a core while flying".
+    - **Read as written,** radius 32 passes: a join saves 126 ms.
+    - **But a join isn't a spike:** the server sends at most 180 chunks a second, so a radius-32
+      join spreads over about 19 s, roughly 0.7% of a core.
+    - **The rule became** 5% of a core, sustained, during a join or while moving, so bytes stay.
+      PLAN.md records it.
+15. **Step 11.4's commands were typed in the game, not the server console.** The official
+    server's log shows `/time set noon`, `/weather clear` and `/tp @s -515.7 200 88.5 180 90` from
+    the owner's player. The screenshot wasn't kept in `run/m3-official/`: the owner compared the
+    view with the map directly.
 
 ## Results
 
@@ -595,3 +608,56 @@ height 330 first, Deviation 10; per-chunk costs after the speedup):
   - radius 8: 5.6 and 7.4 chunks/s;
   - radius 16: 9.9 and 12.8;
   - radius 32: 18.5 and 24.1.
+
+**Step 10: the `Arc` decision** (owner, 2026-10-21): **bytes stay.**
+- **Why so little saving:** the `Arc` path would still need C (to reach the client's
+  Bedrock-native format) and S (a snapshot, by Finding 5). It saves only (E + D) − (S + C), about
+  30 µs per chunk, before or after the speedup.
+- **Against the per-second rule (Deviation 14):**
+  - a radius-32 join saves roughly 0.7% of a core;
+  - flying saves 0.15%;
+  - the threshold is 5%.
+- Recorded in PLAN.md, "Why bytes, not structs".
+
+**Step 11: verify, accept, tick.**
+- **Fork lints and tests** (fork `e251ffb`):
+  - clippy is clean on `pumpkin-protocol`, plain and with `--features client`;
+  - also clean on `pumpkin-core --features pumpkin-protocol/client`, and on `pumpkin-world`;
+  - `pumpkin-protocol --features client`: 139 pass, 1 ignored;
+  - `net::bedrock`: 41/41;
+  - `pumpkin-world` chunk: 131/131.
+- **Client:** clippy is clean, 24/24 tests.
+- **Diff check:** `git -C pumpkin diff 03b498c --stat` lists only `update_block.rs` (+3),
+  `client_codecs/mod.rs` (+19 −2) and `palette.rs` (+397 −104, most of it the test oracle).
+- **Acceptance run** (2026-10-21, dev build;
+  `RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --map <abs>/run/m3/map.png`;
+  exit code 0):
+
+  ```
+  INFO  Block table: 15953 Bedrock ids for 35723 Java states; 19770 Java states share a Bedrock id with a lower one, which wins
+  INFO  StartGame: runtime id 1, seed 1794154124062040974, world spawn (-588, 200, 88), player eyes at (-523.70, 64.62, 88.50)
+  INFO  329 LevelChunk packets in this join (waited 2.0 s)
+  INFO  PASS spawn: PlayerSpawn received; SetLocalPlayerAsInitialized sent
+  INFO  PASS movement: the server's player moved 7.80 blocks east (needs 4); feet y 63.00 -> 63.00
+  INFO  PASS chunks: 329 LevelChunk packets received (needs more than 4)
+  INFO  PASS chunks decoded: 329 of 329 LevelChunk packets decoded, 0 errors; block ids are hashed; 19 block actors; 0 UpdateBlocks for unloaded chunks ignored
+  INFO  PASS world matches server: 329 chunks equal block for block on both layers and biome for biome: 325 on the full pass (13.71 s), 4 on a re-check; 0 no longer loaded on the server; 14.16 s
+  INFO  Host at x -515.7, z 88.5 (eyes at y 64.6)
+  INFO  Map: 329 chunks, 304×304 px, 0 unknown ids -> ...\run\m3\map.png
+  INFO  Completed save!
+  INFO  Embedded server stopped
+  ```
+
+  `Get-Process limonite-client` then returned nothing. The full pass was slower than the usual
+  6 s because the fork lints were compiling at the same time.
+- **Official-client comparison** (2026-10-21, 19:41):
+  - **The setup:** `run/client/world` and `run/pumpkin/pumpkin.toml` were copied into
+    `run/m3-official/` after that clean exit. The stock server was built at fork `e251ffb`
+    (default features, release with the env vars) and run there in a Terminal tab.
+  - **The join:** the owner joined from Bedrock 1.26.52 over NetherNet, teleported to the host's
+    position looking straight down, and compared the view with `run/m3/map.png`. Verdict:
+    "very similar", a match.
+  - **What it also proved:** this join was the NetherNet regression, and the first time the
+    sped-up encoder met the official client. The server log shows the join and the commands,
+    with no errors.
+  - Afterwards `Get-Process pumpkin` returned nothing.
