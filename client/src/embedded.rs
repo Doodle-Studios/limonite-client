@@ -14,6 +14,8 @@ use pumpkin_core::{
 use tokio::runtime::Runtime;
 use tracing::{error, info};
 
+use crate::settings::Settings;
+
 /// How long shutdown waits for the runtime's leftover tasks after the world is saved.
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -22,8 +24,10 @@ const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 ///
 /// Everything that would open a socket or reach the internet is off. The only
 /// way in is the in-process `LocalChannel`.
-pub fn config() -> PumpkinConfig {
+pub fn config(settings: &Settings) -> PumpkinConfig {
     let mut config = PumpkinConfig::default();
+    // Only for players without saved data; a saved host keeps its mode.
+    config.basic.default_gamemode = settings.gamemode;
     let networking = &mut config.advanced.networking;
     // No UDP or TCP 19132, and no LAN discovery on 7551.
     networking.bedrock.nethernet.enabled = false;

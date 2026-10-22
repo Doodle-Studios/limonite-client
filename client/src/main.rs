@@ -1,6 +1,8 @@
+mod app;
 mod blocks;
 mod checks;
 mod embedded;
+mod input;
 mod install;
 mod login;
 mod map;
@@ -8,6 +10,7 @@ mod measure;
 mod packets;
 mod render;
 mod session;
+mod settings;
 #[cfg(test)]
 mod test_util;
 mod world;
@@ -29,6 +32,7 @@ use crate::{
     checks::Check,
     embedded::EmbeddedServer,
     session::{Session, Stage, TICK},
+    settings::Settings,
     world::World,
 };
 
@@ -68,6 +72,8 @@ struct Args {
     headless: bool,
     /// The Bedrock install: the folder that holds `data/resource_packs`.
     bedrock: Option<PathBuf>,
+    /// What the player chose: the host's gamemode, from `--gamemode`.
+    settings: Settings,
     /// Where the embedded server keeps its world and data files.
     data_dir: PathBuf,
     /// The host's display name.
@@ -96,6 +102,7 @@ impl Args {
         let mut map = None;
         let mut radius = DEFAULT_RADIUS;
         let mut stream = None;
+        let mut settings = Settings::default();
         // The scripted session's flags, which mean nothing to the window.
         let mut headless_only = Vec::new();
         while let Some(arg) = args.next() {
@@ -111,6 +118,12 @@ impl Args {
                     data_dir = args.next().ok_or("--data-dir needs a path")?.into();
                 }
                 "--name" => name = args.next().ok_or("--name needs a name")?,
+                "--gamemode" => {
+                    let mode = args.next().ok_or("--gamemode needs a mode")?;
+                    settings.gamemode = mode.parse().map_err(|_| {
+                        format!("--gamemode: `{mode}` isn't survival, creative, adventure or spectator")
+                    })?;
+                }
                 "--linger" => {
                     let secs = args.next().ok_or("--linger needs a number of seconds")?;
                     let secs = secs
@@ -152,6 +165,7 @@ impl Args {
         };
         Ok(Self {
             headless,
+            settings,
             bedrock: bedrock.as_deref().map(absolute).transpose()?,
             data_dir: absolute(&data_dir)?,
             name,
@@ -223,36 +237,54 @@ fn windowed(args: &Args) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let _looks = blocks::build_appearance(&palette, &vanilla);
+    let looks = blocks::build_appearance(&palette, &vanilla);
     let _tints = render::load_tints(&vanilla.stack);
-    ExitCode::SUCCESS
+
+    let server = match start_server(args) {
+        Ok(server) => server,
+        Err(code) => return code,
+    };
+    let needs = render::Needs {
+        texture_layers: looks.textures.layers,
+        uncapped: false,
+    };
+    let result = app::run(&server, &args.name, args.radius, args.settings, needs);
+    server.stop();
+    result
 }
 
 /// The scripted session (`--headless`): the M2 and M3 acceptance run, which
 /// needs no GPU and no Bedrock install.
 fn headless(args: &Args) -> ExitCode {
-    set_up_process();
+    let server = match start_server(args) {
+        Ok(server) => server,
+        Err(code) => return code,
+    };
+    let result = play(&server, args);
+    server.stop();
+    result
+}
 
+/// Sets up the process, changes into the data directory, and starts the
+/// embedded server.
+fn start_server(args: &Args) -> Result<EmbeddedServer, ExitCode> {
+    set_up_process();
     if let Err(err) = enter_data_dir(&args.data_dir) {
         error!(
             "Can't use the data directory {}: {err}",
             args.data_dir.display()
         );
-        return ExitCode::FAILURE;
+        return Err(ExitCode::FAILURE);
     }
     info!("Data directory: {}", args.data_dir.display());
-
-    let server = match EmbeddedServer::start(embedded::config()) {
-        Ok(server) => server,
-        Err(err) => {
-            error!("{err}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let result = play(&server, args);
-    server.stop();
-    result
+    info!(
+        "New players get gamemode {} (--gamemode)",
+        args.settings.gamemode.name()
+    );
+    EmbeddedServer::start(embedded::config(&args.settings)).map_err(|err| {
+        error!("{err}");
+        ExitCode::FAILURE
+    })
 }
 
 /// The scripted host session: log in, spawn, walk east, check the move on the
@@ -280,6 +312,7 @@ fn play(server: &EmbeddedServer, args: &Args) -> ExitCode {
 
     let spawned = match (spawned, session.spawn()) {
         (Ok(()), Some(spawn)) => {
+            session.check_gamemode(args.settings.gamemode);
             checks.push(walk_and_check(&mut session, server, &spawn));
             if args.measure || args.stream.is_some() {
                 // These runs stay a minute or more. A host left standing

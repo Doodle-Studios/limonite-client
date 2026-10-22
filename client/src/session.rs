@@ -20,7 +20,7 @@ use pumpkin_protocol::{
     bedrock::{
         client::{
             CChunkRadiusUpdated, CDisconnect, CPlayStatus, CResourcePackStackPacket,
-            CResourcePacksInfo, CStartGame,
+            CResourcePacksInfo, CStartGame, GameType,
             network_chunk_publisher_update::CNetworkChunkPublisherUpdate,
             update_block::CUpdateBlock,
         },
@@ -35,7 +35,10 @@ use pumpkin_protocol::{
     packet::Packet,
     serial::PacketRead,
 };
-use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
+use pumpkin_util::{
+    GameMode,
+    math::{vector2::Vector2, vector3::Vector3},
+};
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 use tracing::{debug, info, warn};
 
@@ -43,6 +46,7 @@ use crate::{
     login,
     measure::Stats,
     packets,
+    render::camera::look_direction,
     world::{Applied, World},
 };
 
@@ -108,6 +112,12 @@ pub struct Session {
     spawn: Option<Spawn>,
     /// The eye position the host reports each tick.
     position: Vector3<f32>,
+    /// The position the last input reported, for its movement `delta`.
+    reported: Vector3<f32>,
+    /// The camera's pitch and yaw, once a window drives the host. Until
+    /// then the scripted session faces where `StartGame` put it, or east
+    /// while walking.
+    look: Option<(f32, f32)>,
     /// Ticks of input sent so far; also the input packets' tick number.
     input_tick: u64,
     /// Ticks of moving east still to do, and how far each one goes.
@@ -147,6 +157,8 @@ impl Session {
             stage: Stage::LoggingIn,
             spawn: None,
             position: Vector3::new(0.0, 0.0, 0.0),
+            reported: Vector3::new(0.0, 0.0, 0.0),
+            look: None,
             input_tick: 0,
             walk_ticks: 0,
             step: WALK_STEP,
@@ -242,6 +254,36 @@ impl Session {
         self.walk_ticks > 0
     }
 
+    /// Warns if `StartGame` put the host in another gamemode than `wanted`:
+    /// a world that saved the host keeps the host's own mode (m4-plan
+    /// Finding 11), whatever new players get.
+    pub fn check_gamemode(&self, wanted: GameMode) {
+        let wanted = GameType::from(wanted);
+        if let Some(start_game) = &self.start_game
+            && start_game.player_gamemode != wanted
+        {
+            warn!(
+                "The host is in {:?}, not {wanted:?} as set: this world saved the host's own mode. \
+                 Use a new --data-dir for a fresh world",
+                start_game.player_gamemode
+            );
+        }
+    }
+
+    /// Reports the camera's pose from the next input on: its eye position,
+    /// and its pitch and yaw in Bedrock's angles. The server streams chunks
+    /// around wherever the host is, so the host follows the camera.
+    pub const fn set_pose(&mut self, eye: Vector3<f32>, pitch: f32, yaw: f32) {
+        self.position = eye;
+        self.look = Some((pitch, yaw));
+    }
+
+    /// The world, for a window that tracks its changes.
+    #[expect(dead_code, reason = "the window's meshes track changes (M4 Step 10)")]
+    pub const fn world_mut(&mut self) -> &mut World {
+        &mut self.world
+    }
+
     /// Runs ticks until `done` returns true or `deadline` passes.
     ///
     /// # Errors
@@ -276,19 +318,27 @@ impl Session {
         if self.stage == Stage::Disconnected {
             return;
         }
+        self.send_input();
+    }
 
-        // Input starts with `StartGame`: the server ignores it until the
-        // player has loaded, but any packet keeps its 10 s timeout away.
-        if self.spawn.is_some() && self.stage != Stage::Disconnected {
-            let walking = self.walk_ticks > 0;
-            if walking {
-                self.position.x += self.step;
-                self.walk_ticks -= 1;
-            }
-            let input = self.input(walking);
-            self.send(&input);
-            self.input_tick += 1;
+    /// Sends this tick's `PlayerAuthInput`: one every 50 ms, whatever the
+    /// frame rate.
+    ///
+    /// Input starts with `StartGame`: the server ignores it until the player
+    /// has loaded, but any packet keeps its 10 s timeout away.
+    pub fn send_input(&mut self) {
+        if self.spawn.is_none() || self.stage == Stage::Disconnected {
+            return;
         }
+        let walking = self.walk_ticks > 0;
+        if walking {
+            self.position.x += self.step;
+            self.walk_ticks -= 1;
+        }
+        let input = self.input(walking);
+        self.send(&input);
+        self.reported = self.position;
+        self.input_tick += 1;
     }
 
     /// Handles everything that has arrived, without sending input. Called on
@@ -405,7 +455,8 @@ impl Session {
         let settings = &start_game.level_settings;
         let block = settings.spawn_position.0;
         info!(
-            "StartGame: runtime id {}, seed {}, world spawn ({}, {}, {}), player eyes at ({:.2}, {:.2}, {:.2})",
+            "StartGame: runtime id {}, seed {}, world spawn ({}, {}, {}), player eyes at ({:.2}, {:.2}, {:.2}), \
+             gamemode {:?}",
             spawn.runtime_id,
             settings.seed,
             block.x,
@@ -414,6 +465,7 @@ impl Session {
             spawn.eye_position.x,
             spawn.eye_position.y,
             spawn.eye_position.z,
+            start_game.player_gamemode,
         );
         if !start_game.blocknetwork_ids_are_hashed {
             warn!("StartGame says block ids aren't hashed; the world's id table expects hashes");
@@ -451,24 +503,35 @@ impl Session {
         });
     }
 
-    /// This tick's `PlayerAuthInput`, on the ground, standing or walking east.
+    /// This tick's `PlayerAuthInput`.
     ///
-    /// While walking, the position, `delta` and `move_vec` move together, as
-    /// they would from the official client holding "forward" facing east.
+    /// Scripted, the host is on the ground, standing or walking east: the
+    /// position, `delta` and `move_vec` move together, as they would from the
+    /// official client holding "forward" facing east. Driven by a camera, it
+    /// reports the camera's pose, and how far it moved since the last input.
     fn input(&self, walking: bool) -> SPlayerAuthInput {
-        let (pitch, spawn_yaw) = self
+        let (spawn_pitch, spawn_yaw) = self
             .spawn
             .map_or((0.0, 0.0), |spawn| (spawn.pitch, spawn.yaw));
         // The flags the official client sets while on the ground.
         let mut input_data = Bitset::<66>::default();
         input_data.set(InputData::BlockBreakingDelayEnabled as usize, true);
         input_data.set(InputData::VerticalCollision as usize, true);
-        let (yaw, move_vec, delta_x) = if walking {
-            input_data.set(InputData::Up as usize, true);
-            (YAW_EAST, Vector2::new(0.0, 1.0), self.step)
-        } else {
-            (spawn_yaw, Vector2::new(0.0, 0.0), 0.0)
+        let still = Vector2::new(0.0, 0.0);
+        let (pitch, yaw, move_vec, delta) = match self.look {
+            Some((pitch, yaw)) => {
+                let (now, then) = (self.position, self.reported);
+                let moved = Vector3::new(now.x - then.x, now.y - then.y, now.z - then.z);
+                (pitch, yaw, still, moved)
+            }
+            None if walking => {
+                input_data.set(InputData::Up as usize, true);
+                let delta = Vector3::new(self.step, STANDING_DELTA_Y, 0.0);
+                (spawn_pitch, YAW_EAST, Vector2::new(0.0, 1.0), delta)
+            }
+            None => (spawn_pitch, spawn_yaw, still, Vector3::new(0.0, STANDING_DELTA_Y, 0.0)),
         };
+        let forward = look_direction(pitch, yaw);
         SPlayerAuthInput {
             pitch,
             yaw,
@@ -482,14 +545,14 @@ impl Session {
             interact_pitch: pitch,
             interact_yaw: yaw,
             tick: VarULong(self.input_tick),
-            delta: Vector3::new(delta_x, STANDING_DELTA_Y, 0.0),
+            delta,
             block_actions: None,
             item_interaction: None,
             item_stack_request: None,
             vehicle_rotation: None,
             vehicle_unique_id: None,
             analog_move: Vector2::new(0.0, 0.0),
-            camera_orientation: look_direction(pitch, yaw),
+            camera_orientation: Vector3::new(forward.x, forward.y, forward.z),
             raw_move: move_vec,
         }
     }
@@ -518,43 +581,3 @@ impl Session {
     }
 }
 
-/// The unit vector the camera looks along, from Minecraft angles in degrees:
-/// yaw 0 faces +Z, yaw -90 faces +X, and positive pitch looks down.
-fn look_direction(pitch: f32, yaw: f32) -> Vector3<f32> {
-    let (pitch, yaw) = (pitch.to_radians(), yaw.to_radians());
-    Vector3::new(
-        -yaw.sin() * pitch.cos(),
-        -pitch.sin(),
-        yaw.cos() * pitch.cos(),
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The official client's own `camera_orientation` for its pitch and yaw,
-    /// from the M2 golden fixtures.
-    #[test]
-    fn look_direction_matches_the_official_client() {
-        let fixtures: [&[u8]; 3] = [
-            include_bytes!(
-                "../../pumpkin/crates/pumpkin-protocol/src/bedrock/client_codecs/fixtures/player_auth_input-idle.bin"
-            ),
-            include_bytes!(
-                "../../pumpkin/crates/pumpkin-protocol/src/bedrock/client_codecs/fixtures/player_auth_input-walking.bin"
-            ),
-            include_bytes!(
-                "../../pumpkin/crates/pumpkin-protocol/src/bedrock/client_codecs/fixtures/player_auth_input-jumping.bin"
-            ),
-        ];
-        for mut fixture in fixtures {
-            let input = SPlayerAuthInput::read(&mut fixture).unwrap();
-            let ours = look_direction(input.pitch, input.yaw);
-            let theirs = input.camera_orientation;
-            for (a, b) in [(ours.x, theirs.x), (ours.y, theirs.y), (ours.z, theirs.z)] {
-                assert!((a - b).abs() < 1e-4, "ours {ours:?}, official {theirs:?}");
-            }
-        }
-    }
-}
