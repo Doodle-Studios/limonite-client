@@ -1,3 +1,4 @@
+mod blocks;
 mod checks;
 mod embedded;
 mod install;
@@ -207,6 +208,10 @@ fn windowed(args: &Args) -> ExitCode {
     };
     if let Err(err) = install::load_vanilla(&install) {
         error!("Couldn't load the vanilla packs: {err}");
+        return ExitCode::FAILURE;
+    }
+    if let Err(err) = blocks::load_palette() {
+        error!("{err}");
         return ExitCode::FAILURE;
     }
     ExitCode::SUCCESS
