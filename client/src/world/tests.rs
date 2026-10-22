@@ -4,20 +4,28 @@
 //! server runs, so these tests fail as soon as the encoder changes in a way
 //! the decoder doesn't follow.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, num::NonZero};
 
 use bytes::Bytes;
 use pumpkin_core::net::bedrock::level_chunk::CLevelChunk;
 use pumpkin_data::{Block, BlockState, BlockStateId, biome::Biome};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::{
-    RawPacket, bedrock::client::update_block::CUpdateBlock, packet::Packet, serial::PacketWrite,
+    RawPacket,
+    bedrock::client::{
+        network_chunk_publisher_update::CNetworkChunkPublisherUpdate, update_block::CUpdateBlock,
+    },
+    packet::Packet,
+    serial::PacketWrite,
 };
-use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
-use pumpkin_world::chunk::{ChunkData, palette::bedrock_water_state};
+use pumpkin_util::math::{position::BlockPos, vector2::Vector2, vector3::Vector3};
+use pumpkin_world::{
+    chunk::{ChunkData, palette::bedrock_water_state},
+    cylindrical_chunk_iterator::Cylindrical,
+};
 
 use super::{
-    AIR, Applied, ApplyError, BlockTable, World,
+    AIR, Applied, ApplyError, BlockTable, Change, View, World,
     level_chunk::{self, DecodeError},
 };
 
@@ -206,8 +214,9 @@ fn applies_chunks_and_block_updates() {
     // Chunk (-3, 5) covers x -48..-33 and z 80..95.
     let stone = BlockState::to_be_network_id(Block::STONE.default_state.id);
     let water = BlockState::to_be_network_id(Block::WATER.default_state.id);
-    assert_eq!(world.apply(&update_block(-40, 64, 90, stone, 0)).unwrap(), Applied::Block);
-    assert_eq!(world.apply(&update_block(-40, 64, 90, water, 1)).unwrap(), Applied::Block);
+    let changed = Applied::Block { x: -40, y: 64, z: 90 };
+    assert_eq!(world.apply(&update_block(-40, 64, 90, stone, 0)).unwrap(), changed);
+    assert_eq!(world.apply(&update_block(-40, 64, 90, water, 1)).unwrap(), changed);
     assert_eq!(world.block(-40, 64, 90, 0), Some(stone));
     assert_eq!(world.block(-40, 64, 90, 1), Some(water));
     assert_eq!(world.block(-41, 64, 90, 0), Some(AIR));
@@ -227,6 +236,123 @@ fn applies_chunks_and_block_updates() {
     ));
     // Other packets are ignored.
     assert_eq!(world.apply(&raw(1, Vec::new())).unwrap(), Applied::Ignored);
+}
+
+/// The server's view moved to the chunk holding block (`x`, `z`), with a
+/// radius of `chunks`.
+fn publisher_update(x: i32, z: i32, chunks: u32) -> RawPacket {
+    let mut payload = Vec::new();
+    CNetworkChunkPublisherUpdate::new(BlockPos(Vector3::new(x, 64, z)), chunks * 16)
+        .write(&mut payload)
+        .unwrap();
+    raw(CNetworkChunkPublisherUpdate::PACKET_ID, payload)
+}
+
+fn empty_chunk(x: i32, z: i32) -> RawPacket {
+    raw(CLevelChunk::PACKET_ID, encode(&ChunkData::empty(x, z), false, &[]))
+}
+
+fn loaded(world: &World) -> Vec<(i32, i32)> {
+    let mut chunks: Vec<_> = world.chunks().map(|chunk| (chunk.x, chunk.z)).collect();
+    chunks.sort_unstable();
+    chunks
+}
+
+#[test]
+fn drops_chunks_the_view_has_left() {
+    let mut world = World::new();
+    for x in -12..=12 {
+        for z in -12..=12 {
+            world.apply(&empty_chunk(x, z)).unwrap();
+        }
+    }
+    // Radius 8 around chunk (0, 0): everything within 11 chunks stays.
+    let applied = world.apply(&publisher_update(5, 7, 8)).unwrap();
+    let within = |cx: i32, cz: i32, x: i32, z: i32| (x - cx).pow(2) + (z - cz).pow(2) <= 11 * 11;
+    let expected: Vec<_> = (-12..=12)
+        .flat_map(|x| (-12..=12).map(move |z| (x, z)))
+        .filter(|&(x, z)| within(0, 0, x, z))
+        .collect();
+    assert_eq!(loaded(&world), expected);
+    assert_eq!(
+        applied,
+        Applied::View {
+            dropped: 625 - expected.len()
+        }
+    );
+
+    // Block -1 is in chunk -1: the centre moves to (-1, 4), and the chunks
+    // left behind go. (0, -8) was kept before, and is now 12.04 away.
+    assert!(loaded(&world).contains(&(0, -8)));
+    world.apply(&publisher_update(-1, 70, 8)).unwrap();
+    assert!(loaded(&world).iter().all(|&(x, z)| within(-1, 4, x, z)));
+    assert!(loaded(&world).contains(&(-1, 10)));
+    assert!(!loaded(&world).contains(&(0, -8)));
+}
+
+#[test]
+fn the_kept_set_covers_pumpkins_view_at_every_radius() {
+    let center = (3, -7);
+    for radius in 2u8..=32 {
+        let view = View {
+            center,
+            radius: i32::from(radius),
+        };
+        let cylinder = Cylindrical::new(Vector2::new(center.0, center.1), NonZero::new(radius).unwrap());
+        // The chunks Pumpkin sends, from its lookup table...
+        let sent = cylinder.all_chunks_within().len();
+        for chunk in cylinder.all_chunks_within() {
+            assert!(view.keeps(chunk.x, chunk.y), "radius {radius}: {chunk:?} would be dropped");
+        }
+        // ...and the test it unloads by.
+        let reach = i32::from(radius) + 5;
+        let mut kept = 0;
+        for x in center.0 - reach..=center.0 + reach {
+            for z in center.1 - reach..=center.1 + reach {
+                if cylinder.is_within_distance(x, z) {
+                    assert!(view.keeps(x, z), "radius {radius}: ({x}, {z}) would be dropped");
+                }
+                kept += usize::from(view.keeps(x, z));
+            }
+        }
+        println!(
+            "radius {radius:>2}: Pumpkin's view {sent:>4} chunks, we keep {kept:>4}, an extra {:>3}",
+            kept - sent
+        );
+    }
+}
+
+#[test]
+fn changes_are_tracked_for_each_packet_type() {
+    let stone = BlockState::to_be_network_id(Block::STONE.default_state.id);
+    let mut world = World::new();
+    world.apply(&empty_chunk(0, 0)).unwrap();
+    assert!(world.take_changes().is_empty(), "nothing is recorded until asked");
+
+    world.track_changes();
+    world.apply(&empty_chunk(0, 0)).unwrap();
+    world.apply(&empty_chunk(30, 0)).unwrap();
+    world.apply(&update_block(5, 64, 6, stone, 0)).unwrap();
+    world.apply(&update_block(5, 64, 6, stone, 1)).unwrap();
+    // A block in a chunk we don't have changes nothing.
+    world.apply(&update_block(1000, 64, 0, stone, 0)).unwrap();
+    world.apply(&publisher_update(0, 0, 8)).unwrap();
+    assert_eq!(
+        world.take_changes(),
+        [
+            Change::Chunk { x: 0, z: 0 },
+            Change::Chunk { x: 30, z: 0 },
+            Change::Block { x: 5, y: 64, z: 6 },
+            Change::Block { x: 5, y: 64, z: 6 },
+            Change::Dropped { x: 30, z: 0 },
+        ]
+    );
+    assert!(world.take_changes().is_empty());
+
+    assert!(matches!(
+        world.apply(&raw(CNetworkChunkPublisherUpdate::PACKET_ID, vec![1, 2])),
+        Err(ApplyError::PublisherUpdate(_))
+    ));
 }
 
 #[test]
