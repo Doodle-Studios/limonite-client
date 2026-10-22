@@ -105,7 +105,6 @@ pub fn find(flag: Option<&Path>) -> Result<Install, String> {
 }
 
 /// The vanilla packs and their merged registries.
-#[expect(dead_code, reason = "M4 Step 6 resolves block textures from them")]
 pub struct Vanilla {
     pub stack: PackStack,
     pub blocks: BlocksJson,
