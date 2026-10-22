@@ -8,7 +8,7 @@ A bedrock edition client that is built entirely in rust from scratch with an inb
 > **Expect small to no functionality**
 
 > [!IMPORTANT]
-> Current phase of development is : Milestone 3
+> Current phase of development is : Milestone 4
 
 > [!NOTE]
 > All early development is made possible by using **Claude Opus 5.5** at Extra, Max, or Ultracode effort. Please do not spread hate because of it being **AI generated**

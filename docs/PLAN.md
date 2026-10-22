@@ -316,8 +316,15 @@ Each milestone ends in something runnable and is done only when its acceptance c
      - Bedrock 1.26.52 still joins over NetherNet after the `accept_bedrock` move.
      - Sent packets re-encode byte for byte against official-client captures.
      - Measurements, and the `Arc` decision M3 made from them, are under "Why bytes, not structs". Plan, results and deviations: `docs/milestones/m2-plan.md`.
-3. **Chunk map.** Decode sub-chunks and palettes into world state; dump a top-down map image of loaded chunks.
+3. ✅ **Chunk map.** Decode sub-chunks and palettes into world state; dump a top-down map image of loaded chunks.
    - Accept: map image matches what the official client sees at the same seed and position.
+   - **Done 2026-10-22** with the fork at `e251ffb`.
+     - **Decoding:** `client/src/world/` decodes every `LevelChunk` into Bedrock-native world state and applies `UpdateBlock`.
+     - **The live check:** the decoded world equals the server's own `ChunkData`, block for block on both layers and biome for biome. That held for 329 chunks in the dev world and 3,725 at radius 32. A difference that only comes from a change the server never sent is told apart from a decoder bug.
+     - **The map:** `--map` writes the top-down map. The owner compared it with Bedrock 1.26.52 at the same seed and position, joined over NetherNet to the stock fork server, and judged it a match.
+     - **Encoder speedup:** the fork's Bedrock palette conversion is 4.8× faster (encode 696 → 145 µs per chunk) with byte-identical output. It's an upstream candidate.
+     - **`Arc`:** the decision is made; bytes stay (see "Why bytes, not structs").
+     - Plan, results and deviations: `docs/milestones/m3-plan.md`.
 4. **First pixels.** `winit` window, `wgpu` device, CPU meshing of one chunk, fly camera.
    - Accept: terrain renders with vanilla textures loaded from the user's install via the VFS.
 5. **Playable singleplayer.** Client prediction, entity interpolation, block break/place, client lighting, basic HUD and inventory in the own UI framework, world list.
