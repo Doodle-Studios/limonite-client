@@ -57,6 +57,7 @@ const AIR: u32 = 9;
 const EDUCATION: u32 = 10;
 const BROKEN: u32 = 11;
 const SAND: u32 = 12;
+const BAMBOO: u32 = 13;
 
 fn fixture() -> Fixture {
     let dir = TempDir::new("appearance");
@@ -75,7 +76,11 @@ fn fixture() -> Fixture {
             "tall_grass": { "textures": { "up": "tall_top", "down": "tall_bottom", "side": "unused" } },
             "air": {},
             "broken": { "textures": "nowhere" },
-            "sand": { "isotropic": true, "textures": "sand" }
+            "sand": { "isotropic": true, "textures": "sand" },
+            "bamboo": { "textures": {
+                "up": "bamboo_leaf", "down": "bamboo_sapling", "north": "bamboo_stem",
+                "south": "bamboo_small_leaf", "east": "bamboo_singleleaf", "west": "bamboo_stem"
+            } }
         }"#,
     );
     dir.write(
@@ -91,7 +96,12 @@ fn fixture() -> Fixture {
             "log_side": { "textures": "textures/blocks/log_side" },
             "tall_top": { "textures": "textures/blocks/tall_top" },
             "tall_bottom": { "textures": "textures/blocks/tall_bottom" },
-            "sand": { "textures": "textures/blocks/sand" }
+            "sand": { "textures": "textures/blocks/sand" },
+            "bamboo_stem": { "textures": "textures/blocks/bamboo_stem" },
+            "bamboo_leaf": { "textures": "textures/blocks/bamboo_leaf" },
+            "bamboo_small_leaf": { "textures": "textures/blocks/bamboo_small_leaf" },
+            "bamboo_sapling": { "textures": "textures/blocks/bamboo_sapling" },
+            "bamboo_singleleaf": { "textures": "textures/blocks/bamboo_singleleaf" }
         } }"#,
     );
     dir.write("textures/misc/missing_texture.png", &png(&solid([255, 0, 255, 255])));
@@ -113,6 +123,14 @@ fn fixture() -> Fixture {
     dir.write("textures/blocks/tall_top.png", &png(&solid([10, 10, 10, 0])));
     dir.write("textures/blocks/tall_bottom.png", &png(&solid([11, 11, 11, 0])));
     dir.write("textures/blocks/sand.png", &png(&solid([12, 12, 12, 255])));
+    // Bamboo's leaves have holes; its stem doesn't. The sapling and single
+    // leaf files are left out: the table must not ask for those slots.
+    dir.write("textures/blocks/bamboo_stem.png", &png(&solid([13, 13, 13, 255])));
+    for (name, value) in [("bamboo_leaf", 14), ("bamboo_small_leaf", 15)] {
+        let mut leaf = solid([value, value, value, 255]);
+        leaf.put_pixel(5, 5, Rgba([0, 0, 0, 0]));
+        dir.write(&format!("textures/blocks/{name}.png"), &png(&leaf));
+    }
 
     let palette = Palette::new(HashMap::from([
         (STONE, state("stone", &[])),
@@ -127,6 +145,17 @@ fn fixture() -> Fixture {
         (EDUCATION, state("element_1", &[])),
         (BROKEN, state("broken", &[])),
         (SAND, state("sand", &[])),
+        (
+            BAMBOO,
+            state(
+                "bamboo",
+                &[
+                    ("age_bit", StateValue::Bool(false)),
+                    ("bamboo_leaf_size", text("large_leaves")),
+                    ("bamboo_stalk_thickness", text("thick")),
+                ],
+            ),
+        ),
     ]));
     let stack = PackStack::new(vec![Pack::new(dir.path().to_path_buf())]);
     let (blocks, problems) = BlocksJson::load(&stack);
@@ -238,13 +267,29 @@ fn missing_and_unknown_blocks_draw_the_missing_texture() {
         assert_eq!(f.color(id, Face::Up), [255, 0, 255, 255]);
     }
     let report = &f.built.report;
-    assert_eq!(report.names, 10);
+    assert_eq!(report.names, 11);
     assert!(report.no_entry.contains("element_1"));
     assert!(report.unresolved["broken"].contains("nowhere"));
     assert_eq!(report.invisible, 1);
-    // stone, grass_block, oak_leaves, white_stained_glass, oak_log, tall_grass, sand.
-    assert_eq!(report.textured, 7);
+    // stone, grass_block, oak_leaves, white_stained_glass, oak_log, tall_grass, sand, bamboo.
+    assert_eq!(report.textured, 8);
     assert!(report.failed_textures.is_empty(), "{:?}", report.failed_textures);
+}
+
+#[test]
+fn bamboo_keeps_its_stem_and_leaves_from_the_bag_of_slots() {
+    let f = fixture();
+    let bamboo = f.look(BAMBOO);
+    assert_eq!(bamboo.shape, Shape::Bamboo { thick: true, leaves: BambooLeaves::Large });
+    // The stem in north, and in every slot but the two leaf ones.
+    for face in [Face::North, Face::Down, Face::West, Face::East] {
+        assert_eq!(f.color(BAMBOO, face), [13, 13, 13, 255], "{face:?}");
+    }
+    assert_eq!(f.color(BAMBOO, Face::Up)[..3], [14, 14, 14], "the large leaves");
+    assert_eq!(f.color(BAMBOO, Face::South)[..3], [15, 15, 15], "the small leaves");
+    assert_eq!(bamboo.face(Face::North).class, RenderClass::Opaque);
+    assert_eq!(bamboo.face(Face::Up).class, RenderClass::Cutout);
+    assert!(!bamboo.occludes, "a stalk doesn't hide its neighbours");
 }
 
 #[test]
@@ -340,6 +385,17 @@ fn shapes_follow_states_in_the_real_palette() {
     assert_eq!(shape(&Block::OAK_SAPLING, &[]), Shape::Cross);
     assert_eq!(shape(&Block::STONE, &[]), Shape::Cube);
     assert_eq!(shape(&Block::BARRIER, &[]), Shape::Invisible);
+    // Java's bamboo `age` is Bedrock's stalk thickness, and `leaves` its leaf size.
+    for (age, leaves, thick, expected) in [
+        ("0", "none", false, BambooLeaves::None),
+        ("1", "small", true, BambooLeaves::Small),
+        ("0", "large", false, BambooLeaves::Large),
+    ] {
+        assert_eq!(
+            shape(&Block::BAMBOO, &[("age", age), ("leaves", leaves)]),
+            Shape::Bamboo { thick, leaves: expected }
+        );
+    }
 }
 
 /// The real vanilla packs, read at runtime; nothing is written. Run it with
@@ -387,8 +443,14 @@ fn the_real_install_looks_right() {
     assert_eq!(look(&Block::GLASS).face(Face::Up).class, RenderClass::Cutout);
     assert_eq!(look(&Block::WHITE_STAINED_GLASS).face(Face::Up).class, RenderClass::Blend);
     assert!(look(&Block::SAND).face(Face::Up).isotropic);
+    let bamboo = look(&Block::BAMBOO);
+    assert!(matches!(bamboo.shape, Shape::Bamboo { .. }));
+    assert_eq!(bamboo.face(Face::North).class, RenderClass::Opaque, "the stem");
+    assert_eq!(bamboo.face(Face::Up).class, RenderClass::Cutout, "the large leaves");
+    assert_eq!(bamboo.face(Face::South).class, RenderClass::Cutout, "the small leaves");
 
     let report = &built.report;
+    assert!(!report.stand_ins.contains("bamboo"));
     assert!(report.failed_textures.is_empty(), "{:?}", report.failed_textures);
     // Java's game-test blocks are the only ones sent as Bedrock's `unknown`.
     assert_eq!(report.no_entry_sent.iter().collect::<Vec<_>>(), ["unknown"]);
