@@ -79,6 +79,13 @@ pub struct GpuMesh {
     pub origin: [i32; 3],
 }
 
+impl GpuMesh {
+    #[must_use]
+    pub fn quads(&self) -> u64 {
+        u64::from(self.opaque_quads) + u64::from(self.blend_quads)
+    }
+}
+
 /// What meshing has done, for the log and the title.
 #[derive(Debug, Default)]
 pub struct MeshStats {
@@ -90,6 +97,8 @@ pub struct MeshStats {
     pub quads_built: u64,
     /// Bytes of vertex buffers alive now.
     pub gpu_bytes: u64,
+    /// Quads in those buffers: the faces a frame could draw.
+    pub gpu_quads: u64,
 }
 
 impl MeshStats {
@@ -101,6 +110,16 @@ impl MeshStats {
         } else {
             self.mesh_time.as_secs_f64() * 1e6 / self.meshed as f64
         }
+    }
+
+    fn uploaded(&mut self, mesh: &GpuMesh) {
+        self.gpu_bytes += mesh.buffer.size();
+        self.gpu_quads += mesh.quads();
+    }
+
+    fn freed(&mut self, mesh: &GpuMesh) {
+        self.gpu_bytes -= mesh.buffer.size();
+        self.gpu_quads -= mesh.quads();
     }
 }
 
@@ -167,15 +186,14 @@ impl Meshes {
                     }
                 }
                 Change::Dropped { x, z } => {
-                    let freed: u64 = self
-                        .meshes
-                        .iter()
-                        .filter(|(key, _)| key.x == x && key.z == z)
-                        .map(|(_, mesh)| mesh.buffer.size())
-                        .sum();
-                    self.meshes.retain(|key, _| !(key.x == x && key.z == z));
+                    self.meshes.retain(|key, mesh| {
+                        let keep = !(key.x == x && key.z == z);
+                        if !keep {
+                            self.stats.freed(mesh);
+                        }
+                        keep
+                    });
                     self.dirty.retain(|key| !(key.x == x && key.z == z));
-                    self.stats.gpu_bytes -= freed;
                 }
             }
         }
@@ -296,21 +314,21 @@ impl Meshes {
             usage: wgpu::BufferUsages::VERTEX,
         });
         self.max_quads = self.max_quads.max(opaque_quads).max(blend_quads);
-        self.stats.gpu_bytes += buffer.size();
         let mesh = GpuMesh {
             buffer,
             opaque_quads,
             blend_quads,
             origin: key.origin(),
         };
+        self.stats.uploaded(&mesh);
         if let Some(old) = self.meshes.insert(key, mesh) {
-            self.stats.gpu_bytes -= old.buffer.size();
+            self.stats.freed(&old);
         }
     }
 
     fn remove(&mut self, key: SubChunkKey) {
         if let Some(old) = self.meshes.remove(&key) {
-            self.stats.gpu_bytes -= old.buffer.size();
+            self.stats.freed(&old);
         }
     }
 
@@ -363,7 +381,6 @@ impl Meshes {
     }
 
     /// Whether meshing has caught up with the join at least once.
-    #[expect(dead_code, reason = "the benchmark waits for it (M4 Step 11)")]
     #[must_use]
     pub const fn settled(&self) -> bool {
         self.caught_up_once
