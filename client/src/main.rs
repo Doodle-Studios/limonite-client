@@ -256,6 +256,7 @@ fn windowed(args: &Args) -> ExitCode {
         }
     };
     let looks = blocks::build_appearance(&palette, &vanilla);
+    let stand_ins = blocks::stand_in_ids(&palette, &looks.report);
     let tints = render::load_tints(&vanilla.stack);
 
     let server = match start_server(args) {
@@ -273,6 +274,7 @@ fn windowed(args: &Args) -> ExitCode {
         table: looks.table,
         textures: looks.textures,
         tints,
+        stand_ins,
     };
     let result = app::run(&server, &args.name, args.radius, args.settings, needs, assets, args.bench);
     server.stop();
