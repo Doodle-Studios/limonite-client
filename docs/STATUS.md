@@ -4,13 +4,13 @@ A living page: where the project is, how to build and run it, and what bites. Up
 milestone step lands. Architecture decisions live in `docs/PLAN.md`; this page is about progress
 and environment.
 
-_Last updated: 2026-10-23._
+_Last updated: 2026-10-24._
 
 ## Where we are
 
 - **Current milestone:** 4, first pixels. **Planned and approved on 2026-10-22:**
-  `docs/milestones/m4-plan.md`. **In progress: Steps 1 to 6 are done; next is Step 7** (chunk
-  unloading).
+  `docs/milestones/m4-plan.md`. **In progress: Steps 1 to 10 are done; next is Step 11** (the M6
+  baseline, `--bench`).
   - **What it builds:** a window (winit), a wgpu device, CPU meshes per sub-chunk and a fly
     camera that flies the host. It also adds chunk unloading, and a `packs` crate that reads the
     vanilla packs from the user's Bedrock install at runtime.
@@ -23,8 +23,16 @@ _Last updated: 2026-10-23._
       install and loads the vanilla stack.
     - Step 5, `838c2a7`: Bedrock block names from the fork's block palette.
     - Step 6, `3a991cd`: block appearance, the texture array's CPU half, and biome tints.
-  - **One owner decision so far** (2026-10-23): `blocks.json` merges per block, then per field
-    (m4-plan Deviation 1).
+    - Step 7, `c254e45`: chunk unloading, driven by `NetworkChunkPublisherUpdate`.
+    - Step 8, `bddce75`: the CPU mesher, one sub-chunk at a time.
+    - Step 9, `9f73aff`: the window, the wgpu device and the fly camera. The host is creative by
+      default (`--gamemode`).
+    - Step 10, `d72703f`: the terrain, drawn with vanilla textures. The owner approved the first
+      frames. `b4cb2dc` builds the client at `opt-level = 1` in dev builds.
+  - **Owner decisions so far:**
+    - 2026-10-23: `blocks.json` merges per block, then per field (m4-plan Deviation 1);
+    - 2026-10-24: the client crate builds at `opt-level = 1` in dev builds, so meshing keeps up
+      after a join (Deviation 13). CPU meshing gets no further work ("Notes for M6").
   - **Fork changes:** a client-side reader for `NetworkChunkPublisherUpdate`, and one deliberate
     non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an upstream
     candidate. The fork's `limonite` branch is at `443b954`, two commits ahead of
@@ -345,6 +353,16 @@ Notes for M3 (found in M2) were all handled; see `docs/milestones/m3-plan.md`.
 - **Resource pack names:** only the HAVE_ALL_PACKS and COMPLETED status names are known (from
   the capture). Capture the others before sending them.
 - **ECS:** pick `bevy_ecs` or `hecs` (PLAN.md open question).
+
+## Notes for M6 (found in M4)
+
+- **CPU meshing isn't worth optimising further** (owner, 2026-10-24): M6 replaces it with compute
+  meshing. Parallel or worker-thread meshing comes back only if M6 keeps a CPU fallback path.
+  - **Where it stands:** one sub-chunk at a time on the main thread, nearest first, within 4 ms a
+    frame (m4-plan Decision 6).
+  - **Its speed at radius 8:** 144 µs per sub-chunk in release, and 585 µs in a dev build. The
+    client crate builds at `opt-level = 1` in dev builds for this; unoptimised, it took 1,956 µs
+    (m4-plan Deviation 13).
 
 ## Upstream PR candidates
 
