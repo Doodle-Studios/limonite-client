@@ -1,4 +1,5 @@
 mod app;
+mod bench;
 mod blocks;
 mod checks;
 mod embedded;
@@ -37,10 +38,10 @@ use crate::{
 };
 
 const USAGE: &str = "usage: limonite-client [--bedrock <path>] [--data-dir <path>] [--name <name>] \
-                     [--radius <chunks>]\n       \
+                     [--gamemode <mode>] [--radius <chunks>] [--bench <seconds>]\n       \
                      limonite-client --headless [--data-dir <path>] [--name <name>] \
-                     [--radius <chunks>] [--linger <seconds>] [--measure] [--map <path.png>] \
-                     [--stream <blocks>]";
+                     [--gamemode <mode>] [--radius <chunks>] [--linger <seconds>] [--measure] \
+                     [--map <path.png>] [--stream <blocks>]";
 
 /// The view distance asked for without `--radius`, in chunks.
 const DEFAULT_RADIUS: i32 = 8;
@@ -89,6 +90,9 @@ struct Args {
     radius: i32,
     /// After the join, fly this many blocks east and log how chunks stream.
     stream: Option<u32>,
+    /// Fly the window's camera east for this long, log the frame times, and
+    /// exit (`bench.rs`).
+    bench: Option<Duration>,
 }
 
 impl Args {
@@ -102,6 +106,7 @@ impl Args {
         let mut map = None;
         let mut radius = DEFAULT_RADIUS;
         let mut stream = None;
+        let mut bench = None;
         let mut settings = Settings::default();
         // The scripted session's flags, which mean nothing to the window.
         let mut headless_only = Vec::new();
@@ -149,6 +154,15 @@ impl Args {
                             .map_err(|_| format!("--stream: `{blocks}` isn't a number of blocks"))?,
                     );
                 }
+                "--bench" => {
+                    let secs = args.next().ok_or("--bench needs a number of seconds")?;
+                    let secs = secs
+                        .parse()
+                        .ok()
+                        .filter(|&secs| secs > 0)
+                        .ok_or(format!("--bench: `{secs}` isn't a whole number of seconds above 0"))?;
+                    bench = Some(Duration::from_secs(secs));
+                }
                 other => return Err(format!("unknown argument `{other}`")),
             }
         }
@@ -157,6 +171,9 @@ impl Args {
                 "the scripted session's flags need --headless: {}",
                 headless_only.join(", ")
             ));
+        }
+        if headless && bench.is_some() {
+            return Err("--bench measures the window's frames, so it can't run with --headless".to_string());
         }
         // Resolve now, against the directory we were started in: the working
         // directory changes later, and a relative path would change meaning.
@@ -174,6 +191,7 @@ impl Args {
             map: map.as_deref().map(absolute).transpose()?,
             radius,
             stream,
+            bench,
         })
     }
 }
@@ -211,10 +229,10 @@ fn main() -> ExitCode {
     }
 }
 
-/// The default path, which becomes the window.
+/// The default path: the window.
 ///
-/// So far it loads the assets, logs what it found, and exits. The assets
-/// come first, before the server starts, so a missing install fails at once.
+/// The assets load first, before the server starts, so a missing install
+/// fails at once.
 fn windowed(args: &Args) -> ExitCode {
     let install = match install::find(args.bedrock.as_deref()) {
         Ok(install) => install,
@@ -244,16 +262,19 @@ fn windowed(args: &Args) -> ExitCode {
         Ok(server) => server,
         Err(code) => return code,
     };
+    if args.bench.is_some() && cfg!(debug_assertions) {
+        warn!("This is a debug build: the bench's frame times mean little. Use --release");
+    }
     let needs = render::Needs {
         texture_layers: looks.textures.layers,
-        uncapped: false,
+        uncapped: args.bench.is_some(),
     };
     let assets = app::Assets {
         table: looks.table,
         textures: looks.textures,
         tints,
     };
-    let result = app::run(&server, &args.name, args.radius, args.settings, needs, assets);
+    let result = app::run(&server, &args.name, args.radius, args.settings, needs, assets, args.bench);
     server.stop();
     result
 }

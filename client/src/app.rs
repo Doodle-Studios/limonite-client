@@ -32,6 +32,7 @@ use winit::{
 };
 
 use crate::{
+    bench::{Bench, Sample},
     blocks::appearance::AppearanceTable,
     embedded::EmbeddedServer,
     input::{Action, Input},
@@ -65,7 +66,8 @@ const EYE_HEIGHT: f64 = 1.62;
 const MAX_FRAME_SECONDS: f64 = 0.25;
 
 /// Opens the window, joins the embedded server as the host, and runs until
-/// the window closes or the server ends the connection.
+/// the window closes, the server ends the connection, or a `bench` of that
+/// many seconds is done.
 pub fn run(
     server: &EmbeddedServer,
     name: &str,
@@ -73,6 +75,7 @@ pub fn run(
     settings: Settings,
     needs: Needs,
     assets: Assets,
+    bench: Option<Duration>,
 ) -> ExitCode {
     let mut session = match Session::connect(&server.connector, name, radius) {
         Ok(session) => session,
@@ -91,6 +94,7 @@ pub fn run(
         }
     };
     let mut app = App::new(server, session, settings, needs, assets);
+    app.bench = bench.map(|duration| Bench::new(duration, radius));
     if let Err(err) = event_loop.run_app(&mut app) {
         error!("The window's event loop failed: {err}");
         return ExitCode::FAILURE;
@@ -130,6 +134,10 @@ pub struct App<'a> {
     /// Counting frames for the title, which updates once a second.
     second_started: Instant,
     frames_this_second: u32,
+    /// `--bench`: it flies the camera instead of the keys and the mouse.
+    bench: Option<Bench>,
+    /// Set when the bench is done: the loop ends at its next pass.
+    quit: bool,
     /// Why the loop ended early, if it did.
     failure: Option<String>,
 }
@@ -163,6 +171,8 @@ impl<'a> App<'a> {
             last_frame: now,
             second_started: now,
             frames_this_second: 0,
+            bench: None,
+            quit: false,
             failure: None,
         }
     }
@@ -258,7 +268,8 @@ impl<'a> App<'a> {
 
     fn redraw(&mut self) {
         let now = Instant::now();
-        let seconds = (now - self.last_frame).as_secs_f64().min(MAX_FRAME_SECONDS);
+        let frame_time = now - self.last_frame;
+        let seconds = frame_time.as_secs_f64().min(MAX_FRAME_SECONDS);
         self.last_frame = now;
 
         for action in self.input.take_pressed() {
@@ -270,10 +281,15 @@ impl<'a> App<'a> {
         }
         let (dx, dy) = self.input.take_mouse();
         if let Some(camera) = &mut self.camera {
-            if self.cursor_grabbed {
-                camera.turn(dx, dy);
+            match &self.bench {
+                Some(bench) => camera.fly(bench.movement(), seconds),
+                None => {
+                    if self.cursor_grabbed {
+                        camera.turn(dx, dy);
+                    }
+                    camera.fly(self.input.movement(), seconds);
+                }
             }
-            camera.fly(self.input.movement(), seconds);
         }
 
         // Separate fields, borrowed separately: the frame needs the GPU
@@ -285,6 +301,18 @@ impl<'a> App<'a> {
         let drawn = gpu.frame(|gpu, view, encoder| terrain.draw(gpu, view, encoder, camera, meshes));
         if drawn == Frame::Drawn {
             self.frames_this_second += 1;
+            if let Some(bench) = &mut self.bench {
+                let sample = Sample {
+                    time: frame_time,
+                    draws: terrain.draws,
+                    visible: terrain.visible,
+                    meshes: meshes.len(),
+                    quads: meshes.stats.gpu_quads,
+                    gpu_bytes: meshes.stats.gpu_bytes,
+                    chunks: self.session.world().chunk_count(),
+                };
+                self.quit |= bench.record(sample, &meshes.stats);
+            }
         }
         self.once_a_second(now);
     }
@@ -385,7 +413,12 @@ impl ApplicationHandler for App<'_> {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                if self.bench.as_ref().is_some_and(|bench| !bench.is_done()) {
+                    self.failure = Some("The bench didn't finish: the window was closed first".to_string());
+                }
+                event_loop.exit();
+            }
             WindowEvent::Resized(size) => {
                 self.visible = size.width > 0 && size.height > 0;
                 if let Some(gpu) = &mut self.gpu {
@@ -426,6 +459,10 @@ impl ApplicationHandler for App<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.quit {
+            event_loop.exit();
+            return;
+        }
         self.session.drain();
         if self.session.stage() == Stage::Disconnected {
             self.failure = Some("The embedded server ended the connection".to_string());
@@ -448,6 +485,13 @@ impl ApplicationHandler for App<'_> {
                 camera.position,
                 meshes::BUDGET,
             );
+        }
+        if let (Some(bench), Some(camera), Some(gpu)) = (&mut self.bench, &mut self.camera, &self.gpu)
+            && bench.waiting()
+            && self.meshes.settled()
+        {
+            let chunks = self.session.world().chunk_count();
+            bench.start(camera, chunks, &self.meshes.stats, gpu.config.present_mode);
         }
 
         if self.visible
