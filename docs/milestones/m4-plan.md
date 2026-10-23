@@ -989,3 +989,43 @@ The questions as they were asked:
     official client's fog hides that edge, and fog is out of scope here.
 - **Meshing at radius 8:** the numbers are in Deviation 13. Release takes 144 µs per sub-chunk,
   and a dev build, with the client at `opt-level = 1`, takes 585 µs.
+- **Step 11, the M6 baseline** (2026-10-24): a release build
+  (`CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`) on the owner's RTX
+  5070, on Vulkan, in Immediate present mode and the default 1280×720 window.
+  - **The template:** `run/m4-template`, made by one fresh release run at radius 32. Its seed is
+    1794535420239624271, and its creative host has its eyes at (0.5, 75.6, 0.5). Generating the
+    join's chunks took 21.8 s to the last one, and meshing caught up at 23.4 s.
+  - **The flight:** `--bench 30 --radius R` on a fresh copy each time. It starts at
+    (0.5, 107.6, 0.5) and flies east at 10.92 blocks a second, looking 15° down, for 328 blocks.
+
+  | | Radius 8 | Radius 16 | Radius 32 |
+  | --- | --- | --- | --- |
+  | Frames in 30 s | 83,835 (2,794 fps) | 30,479 (1,016 fps) | 4,983 (166 fps) |
+  | Frame time, average | 0.36 ms | 0.98 ms | 6.02 ms |
+  | p50 | 0.31 ms | 0.88 ms | 5.22 ms |
+  | p95 | 0.57 ms | 1.34 ms | 13.24 ms |
+  | p99 | 0.79 ms | 2.59 ms | 15.58 ms |
+  | Max | 10.27 ms | 12.96 ms | 22.39 ms |
+  | Draw calls a frame: average (most) | 580 (737) | 2,864 (3,228) | 10,689 (11,093) |
+  | Meshes in view, average | 498 | 2,424 | 9,015 |
+  | Meshes on the GPU at the end (most) | 2,633 | 8,833 | 30,086 (30,482) |
+  | Faces on the GPU at the end (most) | 1.60 M | 5.40 M | 18.12 M (18.65 M) |
+  | Vertex buffers at the end (most) | 102 MB | 346 MB | 1,160 MB (1,194 MB) |
+  | Sub-chunks meshed in flight, each | 3,382, 136 µs | 6,705, 145 µs | 12,668, 158 µs |
+  | Chunks after the join, most in flight | 329, 343 | 1,057, 1,079 | 3,725, 3,771 |
+
+  - **Unloading keeps the world bounded:** the most chunks loaded during a flight is at most 4%
+    above the join's.
+  - **Worldgen during the flight:** the template holds the 32-chunk view around spawn, about 512
+    blocks. At radius 32 the view's leading edge starts at that border, so the server generates
+    new chunks for the whole flight. At radius 16 it gets there after about 23 s, and at radius 8
+    never. That worldgen competes for the CPU, which may explain part of radius 32's long tail
+    (its p95 is 2.5 times its p50). M6 flies the same path from the same template, so the
+    comparison stays fair.
+  - **GPU memory:** at radius 32 the vertex buffers alone take 1.16 GB: 18 M faces at 64 bytes,
+    four 16-byte vertices each.
+  - **The join, for comparison:** release meshing caught up 3.5, 7.7 and 22.4 s after the first
+    chunk, and the last chunk came at 1.8, 5.8 and 20.7 s. In the older dev world, release
+    meshing finished with the last chunk (Deviation 13); the longer gap in the fresh template
+    wasn't investigated.
+  - **The palette parses in 35 to 43 ms in release,** against 171 to 216 ms in dev builds.
