@@ -279,7 +279,6 @@ impl Session {
     }
 
     /// The world, for a window that tracks its changes.
-    #[expect(dead_code, reason = "the window's meshes track changes (M4 Step 10)")]
     pub const fn world_mut(&mut self) -> &mut World {
         &mut self.world
     }

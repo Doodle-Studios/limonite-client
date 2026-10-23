@@ -27,12 +27,9 @@ const MOUSE_DEGREES: f32 = 0.15;
 /// be the same direction and the view matrix would be undefined.
 const MAX_PITCH: f32 = 89.9;
 /// The vertical field of view, in degrees.
-#[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
 const FOV_Y: f32 = 70.0;
 /// The near and far planes, in blocks.
-#[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
 const NEAR: f32 = 0.05;
-#[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
 const FAR: f32 = 2048.0;
 
 /// The unit vector the camera looks along, from Bedrock angles in degrees.
@@ -75,7 +72,6 @@ impl Camera {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
     #[must_use]
     pub fn forward(&self) -> Vec3 {
         look_direction(self.pitch, self.yaw)
@@ -106,7 +102,6 @@ impl Camera {
 
     /// Rotation only: the camera stays at the origin (camera-relative
     /// rendering, above).
-    #[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
     #[must_use]
     pub fn view(&self) -> Mat4 {
         camera::rh::view::look_to_mat4(Vec3::ZERO, self.forward(), Vec3::Y)
@@ -115,20 +110,17 @@ impl Camera {
     /// Perspective, right-handed, with depth from 0 at the near plane to 1 at
     /// the far plane and y up: WebGPU's convention, which glam files under
     /// `directx`.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
     #[must_use]
     pub fn projection(&self) -> Mat4 {
         camera::rh::proj::directx::perspective(FOV_Y.to_radians(), self.aspect, NEAR, FAR)
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
     #[must_use]
     pub fn view_projection(&self) -> Mat4 {
         self.projection() * self.view()
     }
 
     /// The view volume's six planes, camera-relative.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
     #[must_use]
     pub fn frustum(&self) -> Frustum {
         Frustum::from_matrix(self.view_projection())
@@ -137,13 +129,11 @@ impl Camera {
 
 /// Six planes bounding what the camera sees. A point `p` is inside a plane
 /// when `plane.xyz · p + plane.w >= 0`.
-#[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
 #[derive(Clone, Copy, Debug)]
 pub struct Frustum {
     planes: [Vec4; 6],
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the terrain draws with it (M4 Step 10)"))]
 impl Frustum {
     /// Reads the planes out of a view-projection matrix (Gribb and
     /// Hartmann's method). A clip-space point is visible when

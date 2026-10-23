@@ -19,8 +19,6 @@
 //! side faces put `v` = 0 at the top, the up face runs `u` along +x and `v`
 //! along +z, and the down face runs `v` along −z.
 
-#![cfg_attr(not(test), expect(dead_code, reason = "the window's meshes call it (M4 Step 10)"))]
-
 use std::collections::HashMap;
 
 use limonite_packs::registry::Face;
@@ -58,9 +56,11 @@ pub const DIAGONAL: u8 = 6;
 /// One corner of a quad: 16 bytes (m4-plan Decision 6).
 ///
 /// `#[repr(C)]` fixes the field order and padding, so the GPU reads it with
-/// the layout Step 10's pipeline declares.
+/// the layout `terrain.rs` declares. `Pod` (plain old data) promises
+/// `bytemuck` that any bytes are a valid `Vertex` and the struct has no
+/// padding, so a `Vec<Vertex>` can be handed to the GPU as bytes, uncopied.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     /// The position in the sub-chunk, in sixteenths of a block: 0 to 256.
     pub position: [u16; 3],
@@ -77,11 +77,13 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    #[cfg(test)]
     #[must_use]
     pub const fn face(&self) -> u8 {
         self.face_class & 0b111
     }
 
+    #[cfg(test)]
     #[must_use]
     pub const fn class(&self) -> u8 {
         self.face_class >> 3

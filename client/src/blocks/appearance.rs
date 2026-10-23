@@ -286,14 +286,12 @@ impl Appearance {
         occludes: true,
     };
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     #[must_use]
     pub const fn face(&self, face: Face) -> &FaceLook {
         &self.faces[face as usize]
     }
 
     /// The liquid it is, if it's one.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     #[must_use]
     pub const fn liquid(&self) -> Option<Liquid> {
         match self.shape {
@@ -304,7 +302,6 @@ impl Appearance {
 }
 
 /// Every palette id's appearance.
-#[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
 pub struct AppearanceTable {
     by_id: HashMap<u32, Appearance>,
 }
@@ -312,7 +309,6 @@ pub struct AppearanceTable {
 impl AppearanceTable {
     /// The id's appearance. An id the palette doesn't know is a cube in the
     /// missing texture.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     #[must_use]
     pub fn get(&self, id: u32) -> &Appearance {
         self.by_id.get(&id).unwrap_or(&Appearance::MISSING)
@@ -353,7 +349,6 @@ pub struct Report {
 
 /// The table, its texture array, and the report.
 pub struct Built {
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     pub table: AppearanceTable,
     pub textures: TextureArray,
     pub texture_seconds: f64,

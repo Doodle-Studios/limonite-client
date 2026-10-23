@@ -37,6 +37,8 @@ winit = "0.30.13"
 glam = "0.34.1"
 # Waits on wgpu's async setup on the main thread, which runs no async runtime.
 pollster = "1.0.1"
+# Casts vertices and uniforms to bytes for the GPU. Already in the lockfile through `image`.
+bytemuck = { version = "1.25.2", features = ["derive"] }
 # The map's PNG writer, and the block textures' PNG and TGA decoders. `png` is exactly
 # pumpkin-core's spec; `tga` is built into `image` and adds no package.
 image = { version = "0.25.10", default-features = false, features = ["png", "tga"] }

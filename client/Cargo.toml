@@ -41,3 +41,9 @@ wgpu.workspace = true
 winit.workspace = true
 glam.workspace = true
 pollster.workspace = true
+bytemuck.workspace = true
+
+[dev-dependencies]
+# Parses and validates the WGSL shaders in tests, with no GPU. The version wgpu uses, so it adds
+# no package.
+naga = { version = "30.0.1", features = ["wgsl-in"] }

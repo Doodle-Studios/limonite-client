@@ -61,7 +61,6 @@ impl Storage {
     /// With [`Storage::palette_index`], a reader that visits every position,
     /// like the mesher, can translate each palette entry once instead of
     /// each of the 4,096 values.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the mesher reads it, from M4 Step 10"))]
     #[must_use]
     pub fn palette(&self) -> &[u32] {
         match self {
@@ -73,7 +72,6 @@ impl Storage {
     /// The palette index at `(x, y, z)`, each below 16. Always in range of
     /// [`Storage::palette`]: every index was checked when the storage was
     /// read.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the mesher reads it, from M4 Step 10"))]
     #[must_use]
     pub fn palette_index(&self, x: usize, y: usize, z: usize) -> usize {
         match self {

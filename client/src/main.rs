@@ -238,7 +238,7 @@ fn windowed(args: &Args) -> ExitCode {
         }
     };
     let looks = blocks::build_appearance(&palette, &vanilla);
-    let _tints = render::load_tints(&vanilla.stack);
+    let tints = render::load_tints(&vanilla.stack);
 
     let server = match start_server(args) {
         Ok(server) => server,
@@ -248,7 +248,12 @@ fn windowed(args: &Args) -> ExitCode {
         texture_layers: looks.textures.layers,
         uncapped: false,
     };
-    let result = app::run(&server, &args.name, args.radius, args.settings, needs);
+    let assets = app::Assets {
+        table: looks.table,
+        textures: looks.textures,
+        tints,
+    };
+    let result = app::run(&server, &args.name, args.radius, args.settings, needs, assets);
     server.stop();
     result
 }
