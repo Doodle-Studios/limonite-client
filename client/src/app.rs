@@ -14,6 +14,7 @@
 //! the latest (`ControlFlow::WaitUntil`).
 
 use std::{
+    collections::HashMap,
     process::ExitCode,
     sync::Arc,
     time::{Duration, Instant},
@@ -33,7 +34,7 @@ use winit::{
 
 use crate::{
     bench::{Bench, Sample},
-    blocks::appearance::AppearanceTable,
+    blocks::{self, appearance::AppearanceTable},
     embedded::EmbeddedServer,
     input::{Action, Input},
     render::{
@@ -54,6 +55,8 @@ pub struct Assets {
     /// Uploaded when the GPU comes up, then freed.
     pub textures: TextureArray,
     pub tints: Tints,
+    /// The ids drawn as stand-in cubes, for the census once the join settles.
+    pub stand_ins: HashMap<u32, String>,
 }
 
 /// After a stall, at most this many overdue ticks are sent at once. The rest
@@ -121,6 +124,8 @@ pub struct App<'a> {
     /// The CPU copy of the texture array, until it's uploaded.
     textures: Option<TextureArray>,
     tints: Tints,
+    /// Until the census is logged.
+    stand_ins: Option<HashMap<u32, String>>,
     meshes: Meshes,
     terrain: Option<Terrain>,
     /// Placed where `StartGame` put the host, once it has spawned.
@@ -161,6 +166,7 @@ impl<'a> App<'a> {
             table: assets.table,
             textures: Some(assets.textures),
             tints: assets.tints,
+            stand_ins: Some(assets.stand_ins),
             meshes: Meshes::default(),
             terrain: None,
             camera: None,
@@ -485,6 +491,12 @@ impl ApplicationHandler for App<'_> {
                 camera.position,
                 meshes::BUDGET,
             );
+        }
+        // Once, when the join's meshing has settled: the stand-in cubes it loaded.
+        if self.meshes.settled()
+            && let Some(stand_ins) = self.stand_ins.take()
+        {
+            blocks::log_stand_in_census(self.session.world().chunks(), &stand_ins);
         }
         if let (Some(bench), Some(camera), Some(gpu)) = (&mut self.bench, &mut self.camera, &self.gpu)
             && bench.waiting()

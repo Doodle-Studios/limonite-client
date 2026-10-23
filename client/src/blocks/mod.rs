@@ -5,12 +5,15 @@ pub mod appearance;
 pub mod palette;
 pub mod palette_source;
 
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 use tracing::{debug, info, warn};
 
-use self::{appearance::Built, palette::Palette};
-use crate::install::Vanilla;
+use self::{
+    appearance::{Built, Report},
+    palette::Palette,
+};
+use crate::{install::Vanilla, world::chunk::Chunk};
 
 /// Loads the Bedrock block palette and checks that it names every Bedrock id
 /// Pumpkin can send, logging the counts and how long it took.
@@ -95,4 +98,113 @@ pub fn build_appearance(palette: &Palette, vanilla: &Vanilla) -> Built {
         start.elapsed().as_secs_f64() * 1000.0,
     );
     built
+}
+
+/// The Bedrock ids drawn as stand-in cubes, with their block names.
+#[must_use]
+pub fn stand_in_ids(palette: &Palette, report: &Report) -> HashMap<u32, String> {
+    palette
+        .iter()
+        .filter(|(_, state)| report.stand_ins.contains(&*state.name))
+        .map(|(id, state)| (id, state.name.to_string()))
+        .collect()
+}
+
+/// Logs how many loaded blocks are drawn as stand-in cubes, by name, most
+/// first: the to-do list for a special-shapes pass (owner, M4).
+pub fn log_stand_in_census<'a>(chunks: impl Iterator<Item = &'a Chunk>, stand_ins: &HashMap<u32, String>) {
+    let start = Instant::now();
+    let mut loaded = 0;
+    let census = stand_in_census(chunks.inspect(|_| loaded += 1), stand_ins);
+    let total: u64 = census.iter().map(|(_, count)| count).sum();
+    let list: Vec<String> = census.iter().map(|(name, count)| format!("{name} {count}")).collect();
+    info!(
+        "Stand-in cubes in the {loaded} loaded chunks: {total} blocks of {} names, most first \
+         (counted in {:.0} ms): {}",
+        census.len(),
+        start.elapsed().as_secs_f64() * 1000.0,
+        list.join(", "),
+    );
+}
+
+/// Counts the blocks in `chunks` whose id is in `stand_ins`, by name: most
+/// first, then by name. Names with no blocks are left out.
+fn stand_in_census<'a>(chunks: impl Iterator<Item = &'a Chunk>, stand_ins: &HashMap<u32, String>) -> Vec<(String, u64)> {
+    let mut counts: HashMap<&str, u64> = HashMap::new();
+    for storage in chunks.flat_map(|chunk| &chunk.sub_chunks).flat_map(|sub_chunk| &sub_chunk.layers) {
+        // Which palette entries are stand-ins. Most storages have none, and
+        // are skipped without reading their 4,096 positions.
+        let names: Vec<Option<&str>> = storage
+            .palette()
+            .iter()
+            .map(|id| stand_ins.get(id).map(String::as_str))
+            .collect();
+        if names.iter().all(Option::is_none) {
+            continue;
+        }
+        let mut uses = vec![0u64; names.len()];
+        for x in 0..16 {
+            for z in 0..16 {
+                for y in 0..16 {
+                    uses[storage.palette_index(x, y, z)] += 1;
+                }
+            }
+        }
+        for (name, count) in names.into_iter().zip(uses) {
+            if let Some(name) = name {
+                *counts.entry(name).or_default() += count;
+            }
+        }
+    }
+    let mut census: Vec<(String, u64)> = counts
+        .into_iter()
+        .filter(|&(_, count)| count > 0)
+        .map(|(name, count)| (name.to_string(), count))
+        .collect();
+    census.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    census
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::{chunk::SubChunk, storage::Storage};
+
+    fn chunk(layers: Vec<Storage>) -> Chunk {
+        Chunk {
+            x: 0,
+            z: 0,
+            dimension: 0,
+            min_section: -4,
+            sub_chunks: vec![SubChunk { layers }],
+            biomes: Vec::new(),
+            block_actors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_census_counts_stand_ins_by_name_most_first() {
+        // Two bamboo states, one fence; 1 is stone and 0 air, neither a stand-in.
+        let stand_ins: HashMap<u32, String> = [(10, "bamboo"), (11, "bamboo"), (20, "oak_fence")]
+            .into_iter()
+            .map(|(id, name)| (id, name.to_string()))
+            .collect();
+        let all_bamboo = chunk(vec![Storage::Single(10)]);
+        let mut mixed = Storage::Single(1);
+        for (x, id) in [(0, 20), (1, 20), (2, 20), (3, 11), (4, 11)] {
+            mixed.set(x, 0, 0, id);
+        }
+        // A fence placed and then broken stays in the palette, used nowhere.
+        let mut stale = Storage::Single(1);
+        stale.set(5, 5, 5, 20);
+        stale.set(5, 5, 5, 1);
+        let chunks = [all_bamboo, chunk(vec![mixed, Storage::Single(0)]), chunk(vec![stale])];
+
+        let census = stand_in_census(chunks.iter(), &stand_ins);
+        assert_eq!(
+            census,
+            [("bamboo".to_string(), 4096 + 2), ("oak_fence".to_string(), 3)]
+        );
+        assert!(stand_in_census(chunks[2..].iter(), &stand_ins).is_empty(), "unused entries count nothing");
+    }
 }
