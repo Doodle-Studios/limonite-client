@@ -172,6 +172,11 @@ const LILY_PAD: &str = "waterlily";
 /// Snow layers: `height` + 1 layers, each two sixteenths.
 const SNOW_LAYER: &str = "snow_layer";
 
+/// A thin stalk with crossed leaves (owner, at the M4 comparison).
+/// `bamboo_stalk_thickness` picks the width and `bamboo_leaf_size` the
+/// leaves.
+const BAMBOO: &str = "bamboo";
+
 /// Liquids, by name.
 const LIQUIDS: [(&str, Liquid); 4] = [
     ("water", Liquid::Water),
@@ -215,6 +220,14 @@ pub enum Liquid {
     Lava,
 }
 
+/// The leaves on a bamboo block, from `bamboo_leaf_size`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BambooLeaves {
+    None,
+    Small,
+    Large,
+}
+
 /// A block's geometry. Heights are in sixteenths of a block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
@@ -228,6 +241,11 @@ pub enum Shape {
     Slab { bottom: u8, top: u8 },
     /// Thin planes just inside the faces in this set of `1 << face` bits.
     Planes { faces: u8 },
+    /// A bamboo stalk, 3 sixteenths wide if `thick` and 2 if not, with
+    /// crossed leaves unless `leaves` is none. Bedrock's `blocks.json` uses
+    /// the face slots as a bag of textures, and the table keeps three: the
+    /// stem in north, the large leaves in up, and the small ones in south.
+    Bamboo { thick: bool, leaves: BambooLeaves },
 }
 
 /// How a face's texels are drawn.
@@ -520,6 +538,16 @@ impl Resolver<'_> {
                 [(key, 0); 6]
             }
             Shape::Cube => pillar_keys(state, textures),
+            Shape::Bamboo { .. } => {
+                // The stem everywhere but the two leaf slots. The entry's
+                // other slots (the sapling and a single leaf) go unused.
+                let stem = (textures.key(Face::North), 0);
+                let mut keys = [stem; 6];
+                for leaves in [Face::Up, Face::South] {
+                    keys[leaves as usize] = (textures.key(leaves), 0);
+                }
+                keys
+            }
             _ => Face::ALL.map(|face| (textures.key(face), 0)),
         };
         for (face, (key, turns)) in Face::ALL.into_iter().zip(keys) {
@@ -618,6 +646,16 @@ fn shape_of(state: &BedrockState) -> Shape {
         let bits = state.int("multi_face_direction_bits").unwrap_or(0);
         return Shape::Planes {
             faces: faces_of(bits, &MULTI_FACE_BITS),
+        };
+    }
+    if name == BAMBOO {
+        return Shape::Bamboo {
+            thick: state.string("bamboo_stalk_thickness") == Some("thick"),
+            leaves: match state.string("bamboo_leaf_size") {
+                Some("small_leaves") => BambooLeaves::Small,
+                Some("large_leaves") => BambooLeaves::Large,
+                _ => BambooLeaves::None,
+            },
         };
     }
     if CROSS.contains(&name)

@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use limonite_packs::registry::Face;
 
 use crate::{
-    blocks::appearance::{Appearance, AppearanceTable, FaceLook, Liquid, RenderClass, Shape},
+    blocks::appearance::{Appearance, AppearanceTable, BambooLeaves, FaceLook, Liquid, RenderClass, Shape},
     render::tint::{Tint, Tints},
     world::{AIR, World},
 };
@@ -322,12 +322,13 @@ impl Block<'_> {
                     }
                 }
             }
-            Shape::Cross => self.cross(tints, mesh),
+            Shape::Cross => self.cross(self.look.face(Face::North), tints, mesh),
             Shape::Planes { faces } => {
                 for face in Face::ALL.into_iter().filter(|&face| faces & (1 << face as u8) != 0) {
                     self.plane(face, tints, mesh);
                 }
             }
+            Shape::Bamboo { thick, leaves } => self.bamboo(thick, leaves, tints, mesh),
         }
     }
 
@@ -372,11 +373,10 @@ impl Block<'_> {
         self.push(corners, uvs, face as u8, look, tints, mesh);
     }
 
-    /// Two planes crossed on the diagonals, each drawn from both sides. They
-    /// run from 1/16 to 15/16, as Java's rescaled `cross` model does on a
-    /// sixteenth grid.
-    fn cross(&self, tints: &Tints, mesh: &mut Mesh) {
-        let look = self.look.face(Face::North);
+    /// Two planes crossed on the diagonals, each drawn from both sides, in
+    /// `look`. They run from 1/16 to 15/16, as Java's rescaled `cross` model
+    /// does on a sixteenth grid.
+    fn cross(&self, look: &FaceLook, tints: &Tints, mesh: &mut Mesh) {
         let uvs = [[0, 0], [0, 16], [16, 16], [16, 0]];
         for (start, end) in [([1, 1], [15, 15]), ([1, 15], [15, 1])] {
             let front = [
@@ -390,6 +390,53 @@ impl Block<'_> {
             let back_uvs = [uvs[3], uvs[2], uvs[1], uvs[0]];
             self.push(front, uvs, DIAGONAL, look, tints, mesh);
             self.push(back, back_uvs, DIAGONAL, look, tints, mesh);
+        }
+    }
+
+    /// A bamboo stalk, as Java's model draws it on a sixteenth grid.
+    ///
+    /// - **The stalk** is a box 2 sixteenths wide, or 3 when thick. Its sides
+    ///   show one of the stem texture's four strips (at u = 0, 3, 6 and 9),
+    ///   picked by position so the rings don't line up along a column; its
+    ///   ends show the cut faces at u = 13. The ends are hidden by a full
+    ///   cube, or by a stalk of the same width.
+    /// - **The offset** is Java's: up to a quarter block in x and z, from a
+    ///   seed without y, so every block of a column is nudged alike and the
+    ///   stalk stays straight.
+    /// - **The leaves** are crossed planes, centred like every M4 cross. Java
+    ///   moves them with the stalk, but that would put corners outside the
+    ///   block, which the vertex positions can't hold.
+    fn bamboo(&self, thick: bool, leaves: BambooLeaves, tints: &Tints, mesh: &mut Mesh) {
+        let stem = self.look.face(Face::North);
+        let width: u8 = if thick { 3 } else { 2 };
+        let [x, y, z] = self.world_position();
+        let column = java_seed(x, 0, z);
+        // At most 4 sixteenths either way, so the stalk stays in its block.
+        let start = |offset: i8| (8 - width / 2).wrapping_add_signed(offset);
+        let (x0, z0) = (start(xz_offset(column)), start(xz_offset(column >> 8)));
+        let (min, max) = ([x0, 0, z0], [x0 + width, 16, z0 + width]);
+        let strip = 3 * (java_seed(x, y, z) & 3) as u8;
+        for face in Face::ALL {
+            let hidden = matches!(face, Face::Up | Face::Down)
+                && (self.neighbour_occludes(face)
+                    || matches!(self.neighbour(face, 0).shape, Shape::Bamboo { thick: other, .. } if other == thick));
+            if hidden {
+                continue;
+            }
+            // The texel rectangle: a strip on the sides, a cut end above and
+            // below.
+            let ([u, v], height) = match face {
+                Face::Up => ([13, 0], width),
+                Face::Down => ([13, 4], width),
+                _ => ([strip, 0], 16),
+            };
+            let uvs = [[u, v], [u, v + height], [u + width, v + height], [u + width, v]];
+            self.push(box_face(face, min, max), uvs, face as u8, stem, tints, mesh);
+        }
+        match leaves {
+            BambooLeaves::None => {}
+            BambooLeaves::Small => self.cross(self.look.face(Face::South), tints, mesh),
+            BambooLeaves::Large => self.cross(self.look.face(Face::Up), tints, mesh),
         }
     }
 
@@ -485,16 +532,30 @@ const fn quarter_turn([u, v]: [u8; 2]) -> [u8; 2] {
     [16 - v, u]
 }
 
-/// A quarter-turn count picked by position, the same on every run. The
-/// position mixing is Java's `Mth.getSeed`; Bedrock's own pattern isn't
-/// known, so it won't match the official client tile for tile.
-fn isotropic_turns(x: i32, y: i32, z: i32, face: u8) -> u8 {
+/// Java's `Mth.getSeed`: a position mixed into a number that's the same on
+/// every run. Java picks texture turns, model variants and plant offsets
+/// with it. Bedrock's own mixing isn't known, so what depends on it won't
+/// match the official client block for block.
+fn java_seed(x: i32, y: i32, z: i32) -> i64 {
     let mut seed = i64::from(x.wrapping_mul(3_129_871)) ^ i64::from(z).wrapping_mul(116_129_781) ^ i64::from(y);
     seed = seed
         .wrapping_mul(seed)
         .wrapping_mul(42_317_861)
         .wrapping_add(seed.wrapping_mul(11));
-    ((seed >> 16) as u8).wrapping_add(face) & 3
+    seed >> 16
+}
+
+/// A quarter-turn count picked by position, the same on every run.
+fn isotropic_turns(x: i32, y: i32, z: i32, face: u8) -> u8 {
+    (java_seed(x, y, z) as u8).wrapping_add(face) & 3
+}
+
+/// Java's horizontal offset along one axis, from the low 4 bits of `seed`:
+/// −¼ to ¼ block in 16 steps, in sixteenths, rounded to the nearest one
+/// (Java keeps the fraction; the vertex grid can't).
+fn xz_offset(seed: i64) -> i8 {
+    let fraction = (seed & 15) as f64 / 15.0;
+    ((fraction - 0.5) * 8.0).round() as i8
 }
 
 #[cfg(test)]

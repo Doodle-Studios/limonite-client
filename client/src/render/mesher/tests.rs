@@ -9,7 +9,7 @@ use pumpkin_world::chunk::ChunkData;
 
 use super::*;
 use crate::{
-    blocks::appearance::{Appearance, AppearanceTable, FaceLook, Liquid, RenderClass, Shape},
+    blocks::appearance::{Appearance, AppearanceTable, BambooLeaves, FaceLook, Liquid, RenderClass, Shape},
     render::tint::{Tint, Tints},
     world::{AIR, World},
 };
@@ -23,6 +23,14 @@ const SLAB: u32 = 6;
 const SNOW: u32 = 7;
 const VINE: u32 = 8;
 const SAND: u32 = 9;
+const BAMBOO: u32 = 10;
+const BAMBOO_THICK_LARGE: u32 = 11;
+const BAMBOO_SMALL: u32 = 12;
+
+/// The texture layers of a bamboo look, as the table keeps them.
+const STEM: u16 = 20;
+const LARGE_LEAVES: u16 = 21;
+const SMALL_LEAVES: u16 = 22;
 
 fn look(shape: Shape, class: RenderClass, tint: Tint, layer: u16) -> Appearance {
     let face = FaceLook {
@@ -38,6 +46,17 @@ fn look(shape: Shape, class: RenderClass, tint: Tint, layer: u16) -> Appearance 
         faces: [face; 6],
         occludes: shape == Shape::Cube && class == RenderClass::Opaque,
     }
+}
+
+/// Bamboo: the stem in north (and the other slots), the large leaves in up,
+/// the small ones in south.
+fn bamboo(thick: bool, leaves: BambooLeaves) -> Appearance {
+    let mut bamboo = look(Shape::Bamboo { thick, leaves }, RenderClass::Opaque, Tint::None, STEM);
+    for (face, layer) in [(Face::Up, LARGE_LEAVES), (Face::South, SMALL_LEAVES)] {
+        bamboo.faces[face as usize].layer = layer;
+        bamboo.faces[face as usize].class = RenderClass::Cutout;
+    }
+    bamboo
 }
 
 fn table() -> AppearanceTable {
@@ -66,6 +85,9 @@ fn table() -> AppearanceTable {
         (SNOW, look(Shape::Slab { bottom: 0, top: 2 }, RenderClass::Opaque, Tint::None, 7)),
         (VINE, look(Shape::Planes { faces: vine_faces }, RenderClass::Cutout, Tint::Foliage, 8)),
         (SAND, sand),
+        (BAMBOO, bamboo(false, BambooLeaves::None)),
+        (BAMBOO_THICK_LARGE, bamboo(true, BambooLeaves::Large)),
+        (BAMBOO_SMALL, bamboo(false, BambooLeaves::Small)),
     ])
 }
 
@@ -234,6 +256,103 @@ fn the_isotropic_rotation_is_the_same_every_run_and_varies_by_place() {
         .collect();
     assert!(orientations.len() > 1, "{orientations:?}");
     assert_eq!(isotropic_turns(10, 64, -3, 1), isotropic_turns(10, 64, -3, 1));
+}
+
+/// The smallest and largest of one coordinate over some vertices.
+fn span(vertices: &[Vertex], axis: usize) -> (u16, u16) {
+    let values = vertices.iter().map(|vertex| vertex.position[axis]);
+    (values.clone().min().unwrap(), values.max().unwrap())
+}
+
+#[test]
+fn a_bamboo_stalk_is_a_thin_box_in_the_stem_strips() {
+    let mesh = mesh_of(&[(5, 5, 5, BAMBOO)], &[]);
+    assert_eq!(mesh.quads(), 6, "four sides and two ends, and no leaves");
+    for axis in [0, 2] {
+        let (min, max) = span(&mesh.opaque, axis);
+        assert_eq!(max - min, 2, "two sixteenths wide");
+        assert!(min >= 5 * 16 && max <= 6 * 16, "inside its block");
+    }
+    for quad in quads(&mesh.opaque) {
+        assert_eq!(quad[0].layer, STEM);
+        let (u_min, u_max) = (quad.iter().map(|v| v.uv[0]).min().unwrap(), quad.iter().map(|v| v.uv[0]).max().unwrap());
+        let (v_min, v_max) = (quad.iter().map(|v| v.uv[1]).min().unwrap(), quad.iter().map(|v| v.uv[1]).max().unwrap());
+        assert_eq!(u_max - u_min, 2);
+        match quad[0].face() {
+            1 => assert_eq!((u_min, v_min, v_max), (13, 0, 2), "the top's cut end"),
+            0 => assert_eq!((u_min, v_min, v_max), (13, 4, 6), "the bottom's cut end"),
+            _ => {
+                assert!([0, 3, 6, 9].contains(&u_min), "a strip, not {u_min}");
+                assert_eq!((v_min, v_max), (0, 16), "the whole strip's height");
+            }
+        }
+    }
+}
+
+#[test]
+fn bamboo_leaves_are_a_cross_in_their_own_texture() {
+    let thick = mesh_of(&[(5, 5, 5, BAMBOO_THICK_LARGE)], &[]);
+    assert_eq!(thick.quads(), 6 + 4);
+    let stalk: Vec<Vertex> = thick.opaque.iter().copied().filter(|v| v.layer == STEM).collect();
+    let (min, max) = span(&stalk, 0);
+    assert_eq!(max - min, 3, "a thick stalk is three sixteenths wide");
+    let leaves: Vec<&Vertex> = thick.opaque.iter().filter(|v| v.layer == LARGE_LEAVES).collect();
+    assert_eq!(leaves.len(), 4 * 4);
+    assert!(leaves.iter().all(|v| v.face() == DIAGONAL && v.class() == 1), "cut-out crossed planes");
+
+    let small = mesh_of(&[(5, 5, 5, BAMBOO_SMALL)], &[]);
+    assert_eq!(small.opaque.iter().filter(|v| v.layer == SMALL_LEAVES).count(), 4 * 4);
+}
+
+#[test]
+fn a_bamboo_column_stands_straight_and_hides_its_inner_ends() {
+    let mesh = mesh_of(
+        &[(5, 4, 5, STONE), (5, 5, 5, BAMBOO), (5, 6, 5, BAMBOO), (5, 7, 5, BAMBOO_THICK_LARGE)],
+        &[],
+    );
+    // The stone keeps all six faces: a stalk hides nothing. The lowest stalk
+    // loses its bottom to the stone and its top to the stalk above; the next
+    // keeps its top, under a wider stalk. The thick one keeps both ends, and
+    // has leaves.
+    assert_eq!(mesh.quads(), 6 + 4 + 5 + 6 + 4);
+    // Both thin segments stand at the same x and z: the offset ignores y.
+    let segment = |y: u16| -> Vec<Vertex> {
+        quads(&mesh.opaque)
+            .into_iter()
+            .filter(|quad| {
+                quad[0].layer == STEM
+                    && quad[0].face() >= 2
+                    && quad.iter().all(|v| (y * 16..=(y + 1) * 16).contains(&v.position[1]))
+            })
+            .flatten()
+            .copied()
+            .collect()
+    };
+    for axis in [0, 2] {
+        assert_eq!(span(&segment(5), axis), span(&segment(6), axis));
+    }
+}
+
+#[test]
+fn bamboo_offsets_stay_in_the_block_and_vary() {
+    assert_eq!(xz_offset(0), -4);
+    assert_eq!(xz_offset(15), 4);
+    assert_eq!((xz_offset(7), xz_offset(8)), (0, 0));
+    assert!((0..16).all(|bits| (-4..=4).contains(&xz_offset(bits))));
+    assert_eq!(xz_offset(-1), xz_offset(15), "a negative seed's low bits, as Java's `&` reads them");
+
+    // A field of stalks: each stays in its block, and they don't all stand
+    // in the same place.
+    let field: Vec<_> = (0..16).flat_map(|x| (0..16).map(move |z| (x, 0, z, BAMBOO))).collect();
+    let mesh = mesh_of(&field, &[]);
+    let mut places = std::collections::HashSet::new();
+    for quad in quads(&mesh.opaque).into_iter().filter(|quad| quad[0].face() == Face::Up as u8) {
+        let (x0, x1) = span(quad, 0);
+        let (z0, z1) = span(quad, 2);
+        assert_eq!((x0 / 16, z0 / 16), ((x1 - 1) / 16, (z1 - 1) / 16), "inside one block");
+        places.insert((x0 % 16, z0 % 16));
+    }
+    assert!(places.len() > 4, "{places:?}");
 }
 
 /// Stone positions in a chunk: x and z within it, and y.
