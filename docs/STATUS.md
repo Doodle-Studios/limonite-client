@@ -23,16 +23,15 @@ _Last updated: 2026-10-24._
       after a join (Deviation 13). CPU meshing gets no further work ("Notes for M6");
     - 2026-10-24: bamboo gets its own shape (Deviation 14), and a census of the other stand-in
       cubes becomes the to-do list under "Special shapes to do".
-  - **Not pushed yet:** `main` is 19 commits ahead of `origin/main`, and the fork's `limonite`
-    branch, at `443b954`, is two ahead of `origin/limonite`.
 - **Fork changes in M4:** a client-side reader for `NetworkChunkPublisherUpdate`, and one
   deliberate non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an
   upstream candidate.
-- **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22):
+- **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22, M4 on
+  2026-10-24):
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
     tracks `origin/main`);
-  - the fork's `limonite` branch, at `e251ffb`, with the M1, M2 and M3 fork commits. It tracks
-    `origin/limonite`.
+  - the fork's `limonite` branch, at `443b954`, with the M1 to M4 fork commits. It tracks
+    `origin/limonite`. The fork goes first, since `main`'s submodule pointer names its commit.
 - **No upstream PR is open.** The candidates are listed under "Upstream PR candidates".
 
   Ask the owner before pushing anything, and before opening an upstream PR.
