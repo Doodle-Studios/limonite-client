@@ -1,8 +1,9 @@
 # Milestone 4 plan: First pixels
 
-**Status:** approved by the owner on 2026-10-22, with all eleven questions answered as recommended
-("Questions and answers", at the end). Execution started on 2026-10-22; `docs/STATUS.md` has the
-progress. The owner asked for four changes at approval, all folded in below:
+**Status: done on 2026-10-24.** Approved by the owner on 2026-10-22, with all eleven questions
+answered as recommended ("Questions and answers", at the end), and executed from 2026-10-22 to
+2026-10-24. The owner accepted the flight and the official-client comparison (Results). The owner
+asked for four changes at approval, all folded in below:
 - the host's gamemode is a setting, creative by default in M4, not a constant in code. STATUS.md
   notes that M5 revisits it together with collision (Decision 10, Step 9);
 - the block palette is loaded through one small loader module, so its source can change later
@@ -978,6 +979,38 @@ The questions as they were asked:
       and client rebuilds still take about 28 s. A debugger may show some client variables as
       optimised out.
 
+14. **Bamboo has its own shape** (owner, at the official-client comparison, 2026-10-24). Decision 5
+    left every other special shape a cube. But bamboo's `blocks.json` entry uses its face slots as
+    a bag of textures, so as a cube it showed a different leaf texture on each face, and the owner
+    judged the view not a match. The owner had first chosen to keep the cube; seeing the two
+    clients side by side changed that.
+    - **The shape now:** Java's model on the sixteenth grid. A stalk 2 sixteenths wide, or 3 when
+      thick, shows the stem texture's strips on its sides and its cut ends above and below. Each
+      column is nudged by Java's offset, up to a quarter block, rounded to a sixteenth. Crossed
+      leaves appear where `bamboo_leaf_size` has them.
+    - **One simplification:** the leaves stay centred, like every M4 cross. Java moves them with
+      the stalk, which would put corners outside the block, and the vertex positions can't hold
+      those.
+    - **The owner re-checked it** against the official client's screenshot: a match.
+15. **A stand-in census** (owner's request at the acceptance flight). Once a join's meshing has
+    settled, the window logs how many loaded blocks of each stand-in cube there are, most first.
+    The acceptance world's list is in STATUS.md, as the to-do list for a special-shapes pass.
+16. **The comparison needed the owner as an operator, and the server at INFO.**
+    - **`ops.json`:** M3's comparison folder had the owner in `data/ops.json`, at level 4. Copying
+      only the world and `pumpkin.toml`, as M3's procedure says, left it empty, and the stock
+      server refused the in-game commands without a word: it still logs them as executed. The
+      owner's entry was copied from M3's, and the server restarted.
+    - **Logging:** with `RUST_LOG=info,pumpkin_core::net::bedrock=debug`, NetherNet's per-datagram
+      debug lines flooded the Terminal tab until Ctrl-C no longer reached the server. That first
+      server was ended by closing its tab, which cost nothing, as its world was a copy. The second
+      ran at INFO and stopped cleanly on Ctrl-C.
+    - **Also:**
+      - `/gamemode creative` came first among the commands, since the official player joins in
+        survival;
+      - the owner's client was Flarial Client 26.52, a mod on top of Bedrock 1.26.52;
+      - our pose came from a second run, because P wasn't pressed in the first;
+      - the screenshots were saved into `run/m4-official/` from the owner's clipboard.
+
 ## Results (filled in during execution)
 
 - **Step 10, the first frames** (owner, 2026-10-24): approved. The dev world at spawn, at radius 8:
@@ -1029,3 +1062,30 @@ The questions as they were asked:
     meshing finished with the last chunk (Deviation 13); the longer gap in the fresh template
     wasn't investigated.
   - **The palette parses in 35 to 43 ms in release,** against 171 to 216 ms in dev builds.
+- **Step 12, the checks** (2026-10-24), run again after the bamboo and census commits:
+  - **12.1:** the fork's Step 1 checks pass. Clippy is clean on all four, and `pumpkin-protocol`
+    passes 141 tests with 1 ignored. `git -C pumpkin diff e251ffb --stat` lists only the three
+    expected files.
+  - **12.2:** 75 client and 26 packs tests pass, and the three real-install tests pass against the
+    install. Clippy is clean. No `.tga` or `.brarchive` file is tracked, and the only tracked
+    image is `docs/readme/title.png`.
+  - **12.3:** `--headless --map` gives five PASS lines and the map.
+- **Step 12.4, the acceptance flight** (owner, 2026-10-24): a fresh world, `run/m4-accept` (seed
+  1794539260450426055), in a dev build. The log has every startup line from Steps 4 to 6. The
+  owner flew it, and flagged bamboo (Deviation 14). Every run exited cleanly.
+- **Step 12.5, the official-client comparison** (owner, 2026-10-24):
+  - **Our side:** the pose `/tp @s 56.79 73.94 90.71 141.3 33.3`, at a jungle edge with bamboo, a
+    beach and the ocean. The screenshot is `run/m4-official/limonite.png`.
+  - **The official side:** the world was copied after a clean exit and served by the stock fork
+    server built at `443b954`. Bedrock 1.26.52, through Flarial Client 26.52, ran on Fancy.
+    `/gamemode creative`, `/time set noon`, `/weather clear` and the `/tp` all ran. The
+    screenshot is `run/m4-official/official.png`.
+  - **The verdict:** not a match at first, because of bamboo. After Deviation 14, a match apart
+    from the out-of-scope differences: lighting, sky, fog, clouds, the field of view and water
+    colour.
+  - **The view's edge:** no holes while flying in the official client, so Pumpkin's wider view
+    (Finding 10) isn't starving it, and there's nothing to raise upstream.
+  - **Afterwards,** no `pumpkin` process was left.
+- **The stand-in census** (release, radius 32, 3,725 chunks around the comparison pose, counted in
+  52 ms): 109,881 blocks of 43 names. Leaf litter leads with 86,229, then oak fences (7,235),
+  pointed dripstone (6,991) and rails (2,994). STATUS.md has the full list.

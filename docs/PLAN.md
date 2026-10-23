@@ -250,10 +250,28 @@ Bedrock resource packs are loaded through a layered virtual filesystem; Molang i
 - Packs can be folders, `.zip` or `.mcpack`; the VFS hides the difference.
 - Hot reload: watch pack folders with `notify` and rebuild only what changed.
 
+**The vanilla stack, as M4 found it** (Bedrock 1.26.52; details in `docs/milestones/m4-plan.md`,
+Findings 2 to 4)
+
+- **Which packs:** every folder in the install's `data/resource_packs` whose header UUID is
+  vanilla's, `0575c61f-a5da-4b7f-9961-ffda2908861e`, at or below the base game version Pumpkin
+  declares (1.26.51), oldest first. That's 55 packs, from `vanilla` (0.0.1) to `vanilla_1.26.50`.
+- **`__brarchive` archives:** most files live in one archive per folder, so
+  `<pack>/__brarchive/textures/blocks.brarchive` holds `textures/blocks/*`. The format: an 8-byte
+  magic `7D 27 25 B1 A0 52 70 26`, a `u32` entry count and a `u32` version (1), then 256-byte
+  entries (a `u8` name length, a 247-byte name field, a `u32` offset and a `u32` size), then the
+  files, stored as they are. An entry of size 0 is absent: sound banks are loose files. The VFS
+  reads archives and loose files alike.
+- **Merging:** `blocks.json` merges per block, then per field, because later vanilla packs often
+  override a single field such as `sound`. `terrain_texture.json` merges per key.
+- **Face slots as a bag of textures:** some `blocks.json` entries feed their own Bedrock renderer
+  rather than six faces. Seagrass and bamboo are two; the client maps those by name.
+
 **Textures**
 
 - Block textures go into a 2D texture array; mixed resolutions are upscaled to the stack's largest size.
 - Memory = width × height × 4 bytes × layers: 1000 textures at 16×16 is about 1 MB, at 512×512 about 1 GB. Feed this into the performance warnings.
+- Vanilla's layer size is 32×32, because 22 special-block textures are that size. M4's array holds 954 layers with 6 mip levels: 5.2 MB. WebGPU guarantees only 256 array layers and desktop adapters report 2,048, so the device asks for the adapter's own limit.
 - Animated textures from `flipbook_textures.json` are extra layers plus a time-driven frame index in the shader.
 
 **Molang** (own crate, reused by animations, render controllers, particles and parts of UI)
@@ -325,8 +343,15 @@ Each milestone ends in something runnable and is done only when its acceptance c
      - **Encoder speedup:** the fork's Bedrock palette conversion is 4.8× faster (encode 696 → 145 µs per chunk) with byte-identical output. It's an upstream candidate.
      - **`Arc`:** the decision is made; bytes stay (see "Why bytes, not structs").
      - Plan, results and deviations: `docs/milestones/m3-plan.md`.
-4. **First pixels.** `winit` window, `wgpu` device, CPU meshing of one chunk, fly camera.
+4. ✅ **First pixels.** `winit` window, `wgpu` device, CPU meshing of one chunk, fly camera.
    - Accept: terrain renders with vanilla textures loaded from the user's install via the VFS.
+   - **Done 2026-10-24** with the fork at `443b954`.
+     - **The window is the default;** the scripted M2 and M3 run moved behind `--headless`. The fly camera flies the host, and chunks the server's view has left are dropped.
+     - **Vanilla from the install:** the `packs` crate stacks the 55 vanilla packs, folders and `__brarchive` archives, read at runtime and never copied (Resource packs). Block names come from the fork's Bedrock palette (Risks).
+     - **Drawing:** every loaded sub-chunk is meshed on the CPU, within 4 ms a frame, and drawn in two passes, camera-relative. Bamboo has its own shape; other special shapes are cubes, which a census counts (STATUS.md has the to-do list).
+     - **The acceptance:** the owner flew a fresh world, then compared it with Bedrock 1.26.52 at the same pose on the stock fork server. A match, apart from the planned differences: lighting, sky, fog and water colour.
+     - **The M6 baseline:** `--bench` in release at radius 8, 16 and 32 gives 2,794, 1,016 and 166 fps. At 32 that's p99 15.6 ms with about 10,700 draw calls a frame.
+     - Plan, results and deviations: `docs/milestones/m4-plan.md`.
 5. **Playable singleplayer.** Client prediction, entity interpolation, block break/place, client lighting, basic HUD and inventory in the own UI framework, world list.
    - Accept: a full session of walking, building and saving with no visible input lag; reload restores the world.
 6. **GPU-driven renderer.** Compute meshing, GPU culling, indirect draws, capability tiers, benchmark + warnings.
@@ -358,6 +383,7 @@ The biggest risk is upstream Pumpkin's Bedrock support being incomplete; the big
 | wgpu RT is experimental | RT path churns between wgpu versions | Keep RT behind the escape hatch and the capability gate |
 | Bedrock protocol changes each game update | External LAN guests on newer clients can't join | Pin the guest client version; follow upstream Pumpkin's protocol bumps |
 | Pumpkin compiles Mojang's vanilla Java datapack into the binary | A distributed Limonite binary would contain Mojang data (worldgen, loot tables, recipes, tags), breaking the "never bundle Mojang assets" rule. `pumpkin-data`'s build script downloads the Java server jar, and generated code `include_str!`s its JSON | Local dev builds only until solved. Decide before any release; one option is to fetch the server jar from Mojang on the user's machine at first run and load the datapack at runtime |
+| The client binary embeds the Bedrock block palette (M4) | 3.9 MB of BDS-mined block names and states, from the fork's `assets/bedrock/block_states.nbt` (CloudburstMC's dump, vendored with Geyser's notice), ship inside the client. It's interoperability data, not assets, but it's Mojang-derived | Dev builds only until decided, together with the datapack row above. `blocks/palette_source.rs` is the one module that knows the source, so a runtime read or a generated table can replace it without touching the renderer |
 | Bedrock auto-updates past Pumpkin's exact protocol | The official client, our control, can't join at all: Pumpkin accepts one exact protocol | Record the client version in each milestone's test; rebase onto upstream protocol bumps; avoid updating the test client mid-milestone |
 | Asset and licence issues | Can't distribute | Load vanilla assets from the user's install; client is GPL-3.0; never bundle packs |
 | Public servers and Realms | Custom clients can trip anti-cheat or break terms | Out of scope; test only on the embedded server and own LAN |
