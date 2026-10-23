@@ -9,8 +9,8 @@ _Last updated: 2026-10-24._
 ## Where we are
 
 - **Current milestone:** 4, first pixels. **Planned and approved on 2026-10-22:**
-  `docs/milestones/m4-plan.md`. **In progress: Steps 1 to 10 are done; next is Step 11** (the M6
-  baseline, `--bench`).
+  `docs/milestones/m4-plan.md`. **In progress: Steps 1 to 11 are done; next is Step 12** (the
+  checks, then the owner's acceptance flight and the official-client comparison).
   - **What it builds:** a window (winit), a wgpu device, CPU meshes per sub-chunk and a fly
     camera that flies the host. It also adds chunk unloading, and a `packs` crate that reads the
     vanilla packs from the user's Bedrock install at runtime.
@@ -29,6 +29,8 @@ _Last updated: 2026-10-24._
       default (`--gamemode`).
     - Step 10, `2898f25`: the terrain, drawn with vanilla textures. The owner approved the first
       frames. `d777af9` builds the client at `opt-level = 1` in dev builds.
+    - Step 11, `996b027`: `--bench`, and the M6 baseline at radius 8, 16 and 32 (`92d2ae0`, in
+      m4-plan Results).
   - **Owner decisions so far:**
     - 2026-10-23: `blocks.json` merges per block, then per field (m4-plan Deviation 1);
     - 2026-10-24: the client crate builds at `opt-level = 1` in dev builds, so meshing keeps up
@@ -363,6 +365,16 @@ Notes for M3 (found in M2) were all handled; see `docs/milestones/m3-plan.md`.
   - **Its speed at radius 8:** 144 µs per sub-chunk in release, and 585 µs in a dev build. The
     client crate builds at `opt-level = 1` in dev builds for this; unoptimised, it took 1,956 µs
     (m4-plan Deviation 13).
+- **The baseline M6 must beat** is in m4-plan Results, Step 11: frame times, draw calls and GPU
+  totals at radius 8, 16 and 32. At radius 32 that's 166 fps, p99 15.6 ms, about 10,700 draw
+  calls a frame, and 1.16 GB of vertex buffers.
+  - **To compare,** run the same flight the same way: a release build with the env vars under
+    Dev environment, and `--data-dir <a fresh copy of run/m4-template> --radius R --bench 30`.
+  - **Keep `run/m4-template`.** It's gitignored, so it exists only on the owner's machine, and a
+    new template gets a new seed, whose numbers won't compare.
+  - **The flight leaves the template's area** at radius 16 and 32, so the server generates chunks
+    during those runs. That's the same for M6, so it's fair, but a bigger template would take
+    worldgen out of the numbers.
 
 ## Upstream PR candidates
 
