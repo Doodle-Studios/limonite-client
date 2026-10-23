@@ -138,14 +138,12 @@ impl World {
     }
 
     /// Starts recording what changes, for [`World::take_changes`].
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     pub fn track_changes(&mut self) {
         self.changes.get_or_insert_with(Vec::new);
     }
 
     /// What changed since the last call, oldest first. Empty unless
     /// [`World::track_changes`] was called.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     pub fn take_changes(&mut self) -> Vec<Change> {
         self.changes.as_mut().map(std::mem::take).unwrap_or_default()
     }

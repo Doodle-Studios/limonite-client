@@ -8,6 +8,8 @@
 
 pub mod camera;
 pub mod mesher;
+pub mod meshes;
+pub mod terrain;
 pub mod textures;
 pub mod tint;
 

@@ -32,12 +32,28 @@ use winit::{
 };
 
 use crate::{
+    blocks::appearance::AppearanceTable,
     embedded::EmbeddedServer,
     input::{Action, Input},
-    render::{Frame, Gpu, Needs, SKY, camera::Camera},
+    render::{
+        Frame, Gpu, Needs,
+        camera::Camera,
+        meshes::{self, Meshes},
+        terrain::Terrain,
+        textures::TextureArray,
+        tint::Tints,
+    },
     session::{Session, Stage, TICK},
     settings::Settings,
 };
+
+/// What the window draws with, prepared before it opens.
+pub struct Assets {
+    pub table: AppearanceTable,
+    /// Uploaded when the GPU comes up, then freed.
+    pub textures: TextureArray,
+    pub tints: Tints,
+}
 
 /// After a stall, at most this many overdue ticks are sent at once. The rest
 /// are skipped: a burst of inputs would only make the server's player jump.
@@ -50,14 +66,23 @@ const MAX_FRAME_SECONDS: f64 = 0.25;
 
 /// Opens the window, joins the embedded server as the host, and runs until
 /// the window closes or the server ends the connection.
-pub fn run(server: &EmbeddedServer, name: &str, radius: i32, settings: Settings, needs: Needs) -> ExitCode {
-    let session = match Session::connect(&server.connector, name, radius) {
+pub fn run(
+    server: &EmbeddedServer,
+    name: &str,
+    radius: i32,
+    settings: Settings,
+    needs: Needs,
+    assets: Assets,
+) -> ExitCode {
+    let mut session = match Session::connect(&server.connector, name, radius) {
         Ok(session) => session,
         Err(err) => {
             error!("Couldn't connect to the embedded server: {err}");
             return ExitCode::FAILURE;
         }
     };
+    // Before any chunk arrives, so the meshes hear about every one.
+    session.world_mut().track_changes();
     let event_loop = match EventLoop::new() {
         Ok(event_loop) => event_loop,
         Err(err) => {
@@ -65,7 +90,7 @@ pub fn run(server: &EmbeddedServer, name: &str, radius: i32, settings: Settings,
             return ExitCode::FAILURE;
         }
     };
-    let mut app = App::new(server, session, settings, needs);
+    let mut app = App::new(server, session, settings, needs, assets);
     if let Err(err) = event_loop.run_app(&mut app) {
         error!("The window's event loop failed: {err}");
         return ExitCode::FAILURE;
@@ -88,6 +113,12 @@ pub struct App<'a> {
     needs: Needs,
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
+    table: AppearanceTable,
+    /// The CPU copy of the texture array, until it's uploaded.
+    textures: Option<TextureArray>,
+    tints: Tints,
+    meshes: Meshes,
+    terrain: Option<Terrain>,
     /// Placed where `StartGame` put the host, once it has spawned.
     camera: Option<Camera>,
     input: Input,
@@ -104,7 +135,13 @@ pub struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    fn new(server: &'a EmbeddedServer, session: Session, settings: Settings, needs: Needs) -> Self {
+    fn new(
+        server: &'a EmbeddedServer,
+        session: Session,
+        settings: Settings,
+        needs: Needs,
+        assets: Assets,
+    ) -> Self {
         let now = Instant::now();
         Self {
             server,
@@ -113,6 +150,11 @@ impl<'a> App<'a> {
             needs,
             window: None,
             gpu: None,
+            table: assets.table,
+            textures: Some(assets.textures),
+            tints: assets.tints,
+            meshes: Meshes::default(),
+            terrain: None,
             camera: None,
             input: Input::default(),
             cursor_grabbed: false,
@@ -234,24 +276,13 @@ impl<'a> App<'a> {
             camera.fly(self.input.movement(), seconds);
         }
 
-        let Some(gpu) = &mut self.gpu else {
+        // Separate fields, borrowed separately: the frame needs the GPU
+        // mutably while the terrain and meshes are read.
+        let (Some(gpu), Some(terrain)) = (&mut self.gpu, &mut self.terrain) else {
             return;
         };
-        let drawn = gpu.frame(|_, view, encoder| {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("sky"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(SKY),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-        });
+        let (camera, meshes) = (self.camera.as_ref(), &self.meshes);
+        let drawn = gpu.frame(|gpu, view, encoder| terrain.draw(gpu, view, encoder, camera, meshes));
         if drawn == Frame::Drawn {
             self.frames_this_second += 1;
         }
@@ -272,16 +303,30 @@ impl<'a> App<'a> {
             return;
         };
         let p = camera.position;
+        let (draws, visible) = self.terrain.as_ref().map_or((0, 0), |t| (t.draws, t.visible));
         if let Some(window) = &self.window {
             window.set_title(&format!(
-                "Limonite: {fps:.0} fps, {:.1} ms; {} chunks; at {:.1}, {:.1}, {:.1}",
+                "Limonite: {fps:.0} fps, {:.1} ms; {} chunks, {} meshes ({} waiting), {visible} visible, \
+                 {draws} draws; at {:.1}, {:.1}, {:.1}",
                 1000.0 / fps.max(0.001),
                 self.session.world().chunk_count(),
+                self.meshes.len(),
+                self.meshes.waiting(),
                 p.x,
                 p.y,
                 p.z
             ));
         }
+        let stats = &self.meshes.stats;
+        debug!(
+            "Meshes: {} on the GPU, {:.1} MB, {} waiting; {} meshed so far at {:.0} µs each, {} quads",
+            self.meshes.len(),
+            stats.gpu_bytes as f64 / 1e6,
+            self.meshes.waiting(),
+            stats.meshed,
+            stats.micros_each(),
+            stats.quads_built,
+        );
         if let Some(player) = self.server.server.get_all_players().first() {
             let server = player.position();
             debug!(
@@ -323,7 +368,12 @@ impl ApplicationHandler for App<'_> {
             }
         };
         match Gpu::new(window.clone(), event_loop.owned_display_handle(), &self.needs) {
-            Ok(gpu) => self.gpu = Some(gpu),
+            Ok(gpu) => {
+                if let Some(textures) = self.textures.take() {
+                    self.terrain = Some(Terrain::new(&gpu, &textures));
+                }
+                self.gpu = Some(gpu);
+            }
             Err(err) => {
                 self.failure = Some(format!("Can't draw: {err}"));
                 event_loop.exit();
@@ -384,6 +434,22 @@ impl ApplicationHandler for App<'_> {
         }
         self.place_camera();
         self.send_ticks();
+
+        // Meshing, within its budget: what changed in the world, nearest
+        // the camera first.
+        let changes = self.session.world_mut().take_changes();
+        self.meshes.apply(changes, self.session.world());
+        if let (Some(gpu), Some(camera)) = (&self.gpu, &self.camera) {
+            self.meshes.build(
+                &gpu.device,
+                self.session.world(),
+                &self.table,
+                &self.tints,
+                camera.position,
+                meshes::BUDGET,
+            );
+        }
+
         if self.visible
             && let Some(window) = &self.window
         {

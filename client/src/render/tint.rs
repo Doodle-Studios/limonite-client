@@ -54,7 +54,6 @@ pub struct Climate {
 }
 
 /// The tint colours by Bedrock biome id.
-#[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
 pub struct Tints {
     /// For each Bedrock biome id 0 to 255: the grass, foliage, birch and
     /// evergreen colours. An id with no Java biome gets plains'.
@@ -129,7 +128,6 @@ impl Tints {
 
     /// The RGBA colour a face with `tint` gets in biome `biome`. Untinted
     /// faces get white, which leaves the texture as it is.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the window's meshes use it (M4 Step 10)"))]
     #[must_use]
     pub fn color(&self, biome: u32, tint: Tint) -> [u8; 4] {
         let colors = usize::try_from(biome)
