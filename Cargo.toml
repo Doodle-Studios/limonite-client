@@ -79,3 +79,10 @@ strip = false
 # our own crates keep debug info and backtraces have line numbers.
 [profile.dev.package."*"]
 debug = false
+
+# Our own setting, not Pumpkin's: the client gets light optimisation in dev builds too
+# (m4-plan Deviation 13). Unoptimised, meshing a sub-chunk took about 2 ms, so terrain kept
+# popping in for 4 s after a join at radius 8; at opt-level 1 it takes about 0.55 ms. Overflow
+# checks and debug assertions are separate settings, so they stay on.
+[profile.dev.package.limonite-client]
+opt-level = 1
