@@ -1,8 +1,8 @@
 # Milestone 4 plan: First pixels
 
 **Status:** approved by the owner on 2026-10-22, with all eleven questions answered as recommended
-("Questions and answers", at the end). Execution hasn't started. The owner asked for four changes
-at approval, all folded in below:
+("Questions and answers", at the end). Execution started on 2026-10-22; `docs/STATUS.md` has the
+progress. The owner asked for four changes at approval, all folded in below:
 - the host's gamemode is a setting, creative by default in M4, not a constant in code. STATUS.md
   notes that M5 revisits it together with collision (Decision 10, Step 9);
 - the block palette is loaded through one small loader module, so its source can change later
@@ -919,5 +919,73 @@ The questions as they were asked:
 6. **Pumpkin can send one block that has no `blocks.json` entry:** `unknown`. Finding 6 expected
    none. Only Java's `test_block` and `test_instance_block`, game-test blocks that worldgen never
    places, map to it. They draw the missing texture.
+7. **Step 9's checks, and Step 10's first frames, ran through a temporary in-app scaffold.** The
+   owner declined computer-use access to the client's window, so a few uncommitted lines in
+   `app.rs` drove it instead. They were removed before each commit.
+   - **Step 9:** the scaffold flew the camera east for 25 s, minimised the window for 37 s,
+     restored it, and closed it. All three checks passed: the server's player trailed the camera
+     by about a tick; chunks went from 329 to 652 during the flight; and the host was still
+     connected after 37 s minimised.
+   - **Step 10:** it saved the first frames, looking north, east, south, west and down, to
+     `run/m4-shots/first/` (gitignored).
+   - **Closing the window** the normal way (`taskkill` without `/F` sends `WM_CLOSE`) exits
+     cleanly: code 0, `Completed save!` and `Embedded server stopped`.
+8. **Each draw's offset comes from a small instance buffer, not a dynamic-offset uniform**
+   (Decision 11 named dynamic-offset uniforms).
+   - Each frame writes one 16-byte offset per visible mesh, the sub-chunk's origin minus the
+     camera, worked out in `f64`, into a vertex buffer stepped per instance. Each draw picks its
+     own with `first_instance`.
+   - **Why:** a dynamic uniform offset must be a multiple of
+     `min_uniform_buffer_offset_alignment`, 256 bytes on most adapters, so each 16-byte offset
+     would take 256, and every draw would switch bind groups. Both ways are core WebGPU, so M4
+     still requests no optional features.
+9. **glam 0.34.1 moved the camera matrices out of `Mat4`.** `Mat4::look_to_rh` and
+   `Mat4::perspective_rh` are now `glam::camera::rh::view::look_to_mat4` and
+   `glam::camera::rh::proj::directx::perspective`. "directx" names the depth range, 0 to 1, which
+   WebGPU shares. The maths is the same, and a unit test checks that the near plane maps to 0 and
+   the far plane to 1.
+10. **A dev-dependency that Decision 14 doesn't list: `naga` 30.0.1.** A unit test parses and
+    validates `terrain.wgsl` with no GPU, so a shader error fails `cargo test` instead of the
+    window at startup. The window found the first one (`class` is a reserved word in WGSL), and
+    the test came after it. wgpu already uses this version, so `Cargo.lock` gains no package.
+11. **Both paths warn when the host's saved gamemode isn't the one set.** A world that saved the
+    host keeps the host's own mode (Finding 11), so `--gamemode` and the creative default only
+    reach a host that joins a world for the first time. After `StartGame`, the client logs both
+    modes and suggests a new `--data-dir`. `run/client`, whose host was saved in survival, shows
+    the warning.
+12. **Meshing counts as caught up once its queue is empty and no chunk has arrived for 2 s,** the
+    headless run's chunk-wait rule. Early in a join the queue often empties while chunks still
+    come, because most sub-chunks wait for a side neighbour, so an empty queue alone fired at
+    0.0 s. The log line gives the time from the first chunk until the queue last emptied.
+13. **The client crate builds at `opt-level = 1` in dev builds** (owner's decision, 2026-10-24).
+    Decision 6's stop rule fired: in a dev build, terrain kept popping in for about 4 s after a
+    join at radius 8.
+    - **The evidence:** three runs on fresh copies of `run/m4-dev` at radius 8, where only the
+      build changed. Each meshed the same 2,240 sub-chunks into 1,937 meshes (64.9 MB), and the
+      last chunk came 1.8 s after the first.
+      - dev, unoptimised: 1,956 µs per sub-chunk, and meshing was done 5.8 s after the first
+        chunk;
+      - dev, client at `opt-level = 1`: 551 µs, done at 2.0 s;
+      - release, LTO off: 144 µs, done at 1.8 s, with the last chunk.
+    - **With the setting in the root `Cargo.toml`:** 585 µs, done at 2.1 s.
+    - **The options not taken:** meshing rounds in parallel on a thread pool, a worker thread (the
+      plan's fallback), or no change. One line fixes the dev build, and release keeps up anyway,
+      so meshing stays on the main thread and a worker thread stays out of scope.
+    - **Why not more** (owner): CPU meshing speed isn't worth optimising further, because M6
+      replaces it with compute meshing. Parallel or worker meshing comes back only if M6 keeps a
+      CPU fallback path (STATUS.md, "Notes for M6").
+    - **The cost:** overflow checks and debug assertions are separate settings, so they stay on,
+      and client rebuilds still take about 28 s. A debugger may show some client variables as
+      optimised out.
 
 ## Results (filled in during execution)
+
+- **Step 10, the first frames** (owner, 2026-10-24): approved. The dev world at spawn, at radius 8:
+  frozen ocean, ice spikes, a snowy spruce taiga, a beach, and kelp and seagrass, with water
+  blending over the seabed. The screenshots are in `run/m4-shots/first/`, which is gitignored.
+  - **Expected, not a bug:** a darker band where the water meets the edge of the view. A ray that
+    enters the water near the edge of the meshed area slopes down only about 15°, so it leaves
+    the drawn area before it reaches the seabed, and the sky shows through the water. The
+    official client's fog hides that edge, and fog is out of scope here.
+- **Meshing at radius 8:** the numbers are in Deviation 13. Release takes 144 µs per sub-chunk,
+  and a dev build, with the client at `opt-level = 1`, takes 585 µs.
