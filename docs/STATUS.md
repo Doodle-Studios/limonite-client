@@ -8,39 +8,26 @@ _Last updated: 2026-10-24._
 
 ## Where we are
 
-- **Current milestone:** 4, first pixels. **Planned and approved on 2026-10-22:**
-  `docs/milestones/m4-plan.md`. **In progress: Steps 1 to 11 are done; next is Step 12** (the
-  checks, then the owner's acceptance flight and the official-client comparison).
-  - **What it builds:** a window (winit), a wgpu device, CPU meshes per sub-chunk and a fly
-    camera that flies the host. It also adds chunk unloading, and a `packs` crate that reads the
-    vanilla packs from the user's Bedrock install at runtime.
-  - **Done so far** (commits on `main`, nothing pushed):
-    - Steps 1 and 2: the fork's `NetworkChunkPublisherUpdate` reader (`1082621`) and
-      `Weather::downfall()` (`443b954`), bumped in `02eabf1`.
-    - Step 3, `cb6732e`: the `packs` crate, a layered VFS over folder packs and `__brarchive`
-      archives.
-    - Step 4, `508fcd7`: `--headless` for the scripted session; the default path finds the
-      install and loads the vanilla stack.
-    - Step 5, `838c2a7`: Bedrock block names from the fork's block palette.
-    - Step 6, `3a991cd`: block appearance, the texture array's CPU half, and biome tints.
-    - Step 7, `c254e45`: chunk unloading, driven by `NetworkChunkPublisherUpdate`.
-    - Step 8, `bddce75`: the CPU mesher, one sub-chunk at a time.
-    - Step 9, `9f73aff`: the window, the wgpu device and the fly camera. The host is creative by
-      default (`--gamemode`).
-    - Step 10, `d72703f`: the terrain, drawn with vanilla textures. The owner approved the first
-      frames. `b4cb2dc` builds the client at `opt-level = 1` in dev builds.
-    - Step 11, `34447e5`: `--bench`, and the M6 baseline at radius 8, 16 and 32 (`545dc37`, in
-      m4-plan Results).
-  - **Owner decisions so far:**
+- **Current milestone:** 5, playable singleplayer. **Not planned yet:** start in plan mode (read
+  PLAN.md's M5, "Notes for M5" below, and m4-plan's Deviations first).
+- **Milestone 4 is done (2026-10-24).** Plan, results and deviations: `docs/milestones/m4-plan.md`.
+  - **What it built:** a window (winit) with a wgpu device and a fly camera that flies the host;
+    CPU meshes for every loaded sub-chunk, drawn with vanilla textures read at runtime from the
+    user's Bedrock install through the new `packs` crate; chunk unloading; and `--bench`, the
+    frame-time baseline M6 must beat.
+  - **The owner accepted it:** a flight in a fresh world, then a side-by-side with Bedrock 1.26.52
+    at the same pose: a match, apart from the planned differences, once bamboo had its own shape.
+  - **Owner decisions in M4:**
     - 2026-10-23: `blocks.json` merges per block, then per field (m4-plan Deviation 1);
     - 2026-10-24: the client crate builds at `opt-level = 1` in dev builds, so meshing keeps up
-      after a join (Deviation 13). CPU meshing gets no further work ("Notes for M6").
-  - **Fork changes:** a client-side reader for `NetworkChunkPublisherUpdate`, and one deliberate
-    non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an upstream
-    candidate. The fork's `limonite` branch is at `443b954`, two commits ahead of
-    `origin/limonite`.
-- **Milestone 3 is done (2026-10-22).** Plan, results and deviations: `docs/milestones/m3-plan.md`.
-  The `Arc` decision is made: bytes stay (PLAN.md, "Why bytes, not structs").
+      after a join (Deviation 13). CPU meshing gets no further work ("Notes for M6");
+    - 2026-10-24: bamboo gets its own shape (Deviation 14), and a census of the other stand-in
+      cubes becomes the to-do list under "Special shapes to do".
+  - **Not pushed yet:** `main` is 19 commits ahead of `origin/main`, and the fork's `limonite`
+    branch, at `443b954`, is two ahead of `origin/limonite`.
+- **Fork changes in M4:** a client-side reader for `NetworkChunkPublisherUpdate`, and one
+  deliberate non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an
+  upstream candidate.
 - **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22):
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
     tracks `origin/main`);
@@ -60,6 +47,7 @@ _Last updated: 2026-10-24._
 | 1. Workspace + fork seam | Cargo workspace with `client/`; fork as a submodule; `Transport` trait with NetherNet behind it; Java listener behind `java-listener`; `tracing` in the client. Bedrock 1.26.52 joined a `--no-default-features` server at `80b19bb` with `java.enabled = true` and no TCP 25565 listener | `main`: `75ae93d` plan, `c27b3e4` workspace, `8b083d9` submodule, `7ed6d8e` tracing, `7ff616c` profile cleanup, `f8971b4` bump. Fork `limonite`: `df1f8e524` Transport, `80b19bb9b` java-listener |
 | 2. Headless embedded client | The client runs Pumpkin on a background thread and joins it as the host over an in-memory `LocalChannel`: unsigned-token login, spawn, 329 chunks, an 8-block walk the server saw (7.8), and no socket owned by the process. Client codecs in `pumpkin-protocol` behind `client`, golden-tested byte for byte against official-client captures. NetherNet regression join passed. `LocalChannel` cost measured; chunks dominate, and the `Arc` decision is deferred to M3's planning | `main`: `b6e34c9` plan, `975b261` bump + deps, `d05e0e1` embedded server, `90e4f22` login and spawn, `441b7a1` walk + check, `b68d672` measure, `7d372f3` bump, `d4f045d` block-actor timing, `3d31577` packet names, then the tick. Fork `limonite`: `de0f7cedc` accept_bedrock, `7c1fa8063` LocalChannel, `85f58b5f6` client codecs, `03b498c47` NBT test fix |
 | 3. Chunk map | The client decodes every `LevelChunk` into Bedrock-native world state and applies `UpdateBlock`. The decoded world equals the server's `ChunkData` block for block on both layers, and biome for biome: 329 chunks in the dev world, 3,725 at radius 32. `--map` writes a top-down map, which the owner judged a match for Bedrock 1.26.52 at the same seed and position (stock fork server over NetherNet, also the regression join). The fork's palette conversion is 4.8× faster (encode 696 → 145 µs per chunk), byte-identical. The `Arc` decision: bytes stay | `main`: `ee42446` plan, `e6c2d3e` bump + deps, `da890ae` decoder, `b2eff5b` world check, `dedeba9` map, `7804524` measure, `be0ef05` progress, `133bc94` drift vs decoder bug, `e904911` bump, `04f05ae` keep the host alive, `e0a5858` results, `55d0c36` Arc decision, then the tick. Fork `limonite`: `dc3a0ac2e` UpdateBlock reader, `e251ffbda` palette speedup |
+| 4. First pixels | A window with a fly camera that flies the host, drawing every loaded sub-chunk with vanilla textures read at runtime from the user's install (55 vanilla packs, folders and `__brarchive` archives; 954 layers of 32×32). Block names from the fork's Bedrock palette; chunks the server's view has left are dropped. The owner accepted a flight in a fresh world and a side-by-side with Bedrock 1.26.52 at the same pose. M6 baseline in release: 2,794, 1,016 and 166 fps at radius 8, 16 and 32 | `main`: `02eabf1` bump, `cb6732e` packs crate, `508fcd7` install + `--headless`, `838c2a7` palette, `3a991cd` appearance, `c0cb67a` deviations, `50a2bcf` progress, `c254e45` unloading, `bddce75` mesher, `9f73aff` window, `d72703f` terrain, `b4cb2dc` dev opt-level, `fa01f0d` deviations, `5ccc2e5` progress, `34447e5` `--bench`, `545dc37` baseline, `4ea93d0` progress, `90397b3` bamboo, `3028183` census, then the tick. Fork `limonite`: `10826210f` publisher reader, `443b954b8` downfall |
 
 Key facts from M0 (details in the recon note, which is required reading before touching the fork):
 - **Transport:** upstream Bedrock is **NetherNet** (WebRTC), not RakNet.
@@ -120,6 +108,25 @@ Key facts from M3 (details, results and deviations in `docs/milestones/m3-plan.m
   - A radius-32 join is 3,725 chunks in about 21 s.
 - **Pumpkin bug:** its fire never tells clients about some changes (Upstream PR candidates).
 
+Key facts from M4 (details, results and deviations in `docs/milestones/m4-plan.md`):
+- **The `packs` crate** (`packs/`): `brarchive.rs` reads `__brarchive` archives with typed errors,
+  `pack.rs` and `stack.rs` stack folder packs (`PackStack::vanilla` picks the vanilla packs), and
+  `registry.rs` merges `blocks.json` and `terrain_texture.json`. PLAN.md, Resource packs, has
+  the format and the rules.
+- **New client modules:**
+  - `install.rs` finds the Bedrock install and loads the vanilla stack;
+  - `blocks/`: the palette (`palette_source.rs` is the only code that knows its source),
+    appearance (shapes, textures, tints and render classes per Bedrock id), and the stand-in
+    census;
+  - `render/`: the device (`mod.rs`), camera, textures, tints, the mesher, the GPU meshes
+    (`meshes.rs`), and the terrain pipelines and shader (`terrain.rs`, `terrain.wgsl`);
+  - `app.rs` (the winit loop), `input.rs`, `settings.rs` and `bench.rs`.
+- **The loop:** ticks are independent of frames. One `PlayerAuthInput` per 50 ms whatever the
+  frame rate, so a minimised window stays connected.
+- **Numbers:** a sub-chunk meshes in 144 µs in release and 585 µs in a dev build; a radius-8 view
+  is about 1,937 meshes and 65 MB of vertex buffers. The palette parses in 35 to 43 ms in
+  release.
+
 ## Dev environment
 
 Windows 11, with Git Bash and PowerShell both used.
@@ -130,18 +137,44 @@ Windows 11, with Git Bash and PowerShell both used.
 
 **Pumpkin fork: `pumpkin/`**
 - A git submodule of `https://github.com/Doodle-Studios/Pumpkin`, branch **`limonite`**, at
-  `03b498c`: upstream `aac0a82` (2026-10-18) plus two M1 and four M2 commits. Its git directory
-  is `.git/modules/pumpkin`.
+  `443b954`: upstream `aac0a82` (2026-10-18) plus the M1 to M4 commits. Its git directory is
+  `.git/modules/pumpkin`.
 - `upstream` points at `https://github.com/Pumpkin-MC/Pumpkin.git`, whose default branch is
   `master`.
 - **Fresh clone:** clone `https://github.com/Doodle-Studios/limonite-client`, then set long
   paths before the submodule checks out. Run `git -c core.longpaths=true submodule update
   --init`, then `git -C pumpkin config core.longpaths true`.
 
-**Build and run the client** (run at the repo root):
+**Run the client: the window** (run at the repo root):
 
 ```bash
-RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --map run/m3/map.png
+cargo run -p limonite-client
+```
+
+- **What it does:** finds the Bedrock install, then loads the vanilla packs, the block palette,
+  the appearance table and the textures. Each step logs one line, with counts and problems.
+  Then it starts the embedded server, joins as the host, and opens the window.
+  - **The install:** the GDK default, `<drive>:\XboxGames\Minecraft for Windows\Content`, or
+    `--bedrock <path>` to the folder that holds `data/resource_packs`. Vanilla files are read at
+    runtime and never copied.
+- **Controls:** click in the window to capture the mouse, and move the mouse to look. W, A, S and
+  D move, Space rises, Left Shift sinks, and holding Left Ctrl is three times faster. Esc
+  releases the mouse. P logs the pose as a `/tp` command for the official client.
+- **The title bar** shows the frame rate and frame time, chunks, meshes and the queue, visible
+  meshes and draws, and the position. Closing the window saves the world and exits.
+- **Window flags:**
+  - `--gamemode <mode>`: survival, creative, adventure or spectator, for a host that joins a
+    world for the first time; creative by default (the fly camera passes through terrain). A
+    saved host keeps its own mode, with a warning.
+  - `--bench <seconds>`: the M6 baseline flight ("Notes for M6"). Use a release build.
+- **Dev builds** compile the client crate at `opt-level = 1` (root `Cargo.toml`), so meshing keeps
+  up after a join. Overflow checks and debug assertions stay on.
+
+**Run the client: the scripted session** (`--headless`, the M2 and M3 acceptance run; no GPU and
+no Bedrock install needed):
+
+```bash
+RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --headless --map run/m3/map.png
 ```
 
 - **What it does:**
@@ -154,29 +187,31 @@ RUST_LOG=info,limonite_client=debug cargo run -p limonite-client -- --map run/m3
   The exit code is non-zero on any failure.
 - **Debug logging:** `limonite_client=debug` logs every packet name received, and the world
   check's first-pass differences.
-- **Flags:**
+- **Flags for both:**
   - `--data-dir <path>`: default `run/client`, gitignored. The client changes into it, because
     Pumpkin writes its world there.
   - `--name <name>`: the host's display name, default `Limonite`.
-  - `--linger <secs>`: stay in-world afterwards, for outside inspection; it logs the process id.
-  - `--map <path.png>`: a top-down map of the loaded chunks, written after the checks.
   - `--radius <chunks>`: the view distance to ask for, 2 to 32 (default 8). The embedded server
     allows up to 32.
+  - `--gamemode <mode>`, as above.
+- **`--headless` only:**
+  - `--linger <secs>`: stay in-world afterwards, for outside inspection; it logs the process id.
+  - `--map <path.png>`: a top-down map of the loaded chunks, written after the checks.
   - `--stream <blocks>`: after the join, fly that many blocks east and log how chunks stream.
   - `--measure`: the cost table, chunk cost in phases, and the block-change probe. Only
     meaningful in a release build:
 
     ```bash
-    CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo run --release -p limonite-client -- --measure
+    CARGO_PROFILE_RELEASE_LTO=false CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo run --release -p limonite-client -- --headless --measure
     ```
 
     With `--measure` or `--stream`, the host rises to eye height 330 first (Gotchas, "The host
     has no physics").
-  - **Repeatable measurements:** run each on a fresh copy of one template world (`--data-dir
-    run/m3-<label>`), as M3 did.
-- **Run time:** a dev run takes about 25 s plus the linger. The world check's full pass is about
-  6 s in a dev build and under 1 s in release at radius 8. On a fresh world, `StartGame` came
-  1.85 s after the resource packs.
+- **Repeatable measurements:** run each on a fresh copy of one template world (`--data-dir
+  run/m<N>-<label>`), as M3 and M4 did.
+- **Run time:** a headless dev run takes about 25 s plus the linger. The world check's full pass is
+  about 6 s in a dev build and under 1 s in release at radius 8. On a fresh world, `StartGame`
+  came 1.85 s after the resource packs.
 - **First builds:** about 3 minutes for dev, and 5 for release with the env vars. They compile
   `pumpkin-core` into the root `target/`, separate from `pumpkin/target/`.
 - **Socket check** while it lingers, in PowerShell:
@@ -237,6 +272,20 @@ cargo clippy -p pumpkin-core --all-targets
   defaults on first start.
 - Expect `Bedrock NetherNet signaling is listening on 0.0.0.0:19132`, then
   `Accepted Bedrock NetherNet connection` and `… joined the game` when the client connects.
+- **In a Terminal tab, leave out the debug level** (m4-plan Deviation 16). NetherNet's
+  per-datagram debug lines flood the tab, and Ctrl-C stops reaching the server. Plain INFO shows
+  joins and commands, and stops cleanly on Ctrl-C.
+
+**Official-client comparison** (M3 and M4): copy into the comparison folder, such as
+`run/m4-official/`, only after a clean exit of our client:
+- the world folder;
+- `run/pumpkin/pumpkin.toml`;
+- **`data/ops.json` with the owner at level 4** (copy `run/m3-official/data/ops.json`). Without it
+  the server refuses every in-game command, while still logging it as executed.
+
+Then run the stock fork server there, join from Bedrock, and type `/gamemode creative`,
+`/time set noon`, `/weather clear` and the `/tp` our client logged with P. Screenshots stay in
+the gitignored folder.
 
 **Join from the official client**
 - Bedrock → Play → Servers → Add Server, address `127.0.0.1`, port `19132`.
@@ -291,50 +340,40 @@ cargo clippy -p pumpkin-core --all-targets
   debug lines, e.g. `Accepted Bedrock NetherNet connection`. Read those in the console.
 - **Some block changes never reach clients.** Pumpkin's fire uses `NOTIFY_NEIGHBORS` alone
   (Upstream PR candidates). The world check tells that kind of drift apart from a decoder bug.
+- **A running client locks its `.exe`.** On Windows, `cargo build` can't replace
+  `target/debug/limonite-client.exe` while a window is open, so close it first. `cargo test` and
+  `cargo clippy` neither touch nor rebuild it: run `cargo build` before starting the `.exe`
+  directly, or it's stale.
+- **Closing the window from a script:** `taskkill /PID <pid>`, without `/F`, sends `WM_CLOSE`. The
+  host leaves, the world saves, and the exit code is 0. `/F` skips the save.
+- **A harmless shutdown warning:** `Failed to send NetherNet packet … local client is gone` can
+  appear as the client exits. The server sends a last packet after the host has left; nothing is
+  lost.
+- **The camera starts where the host was saved,** like the scripted run. Press P before closing if
+  you'll want the spot again: the window can log a pose, but can't go to one yet.
 
-## Notes for M4 (found in M3)
+Notes for M4 (found in M3) were all handled; see `docs/milestones/m4-plan.md`. Notes for M3 (found
+in M2) were too; see `docs/milestones/m3-plan.md`.
 
-All of these are folded into `docs/milestones/m4-plan.md`.
+## Notes for M5 (found in M2, M4's planning and M4)
 
-- **Chunk unloading isn't done.** The client keeps every chunk it receives.
-  - **What should drive it:** `NetworkChunkPublisherUpdate` gives the view's centre and radius,
-    which says what to drop.
-  - **Why it matters:** chunks left behind go stale. The server only sends block updates for
-    chunks inside a player's view (m3-plan Deviation 13).
-- **The world-state API** (`client/src/world/`):
-  - **The world:** `World::apply(&RawPacket)` takes `LevelChunk` and `UpdateBlock`.
-    `World::chunk(x, z)` and `World::chunks()` read it.
-  - **A chunk:** `Chunk::block(x, y, z, layer)` and `Chunk::biome(x, y, z)` take x and z within
-    the chunk and an absolute y. A missing sub-chunk or layer reads as air.
-  - **Sub-chunks:** `Chunk::sub_chunks[i].layers` holds the `Storage`s. `Storage::get` does no
-    per-read check, because indices are checked once at decode.
-  - **For a mesher:** walk the sub-chunks directly and skip all-air ones
-    (`Storage::Single(AIR)` on every layer), as `map.rs` does.
-- **Map colours are Java's** (`Block::map_color`), reached through the Bedrock-to-Java table. Fine
-  for the map, not for rendering.
-- **Textures will need Bedrock block names.** The world holds Bedrock network ids, which are
-  hashes (`StartGame` says so). Vanilla Bedrock textures are keyed by Bedrock block names and
-  states, but `pumpkin-data` only maps Java states to Bedrock ids. M4 needs a Bedrock id →
-  Bedrock name-and-states table; plan where it comes from without bundling Mojang data.
-- **The Bedrock-to-Java table isn't a true inverse.** It has 15,953 Bedrock ids for 35,723 Java
-  states: 19,770 Java states share an id with a lower one, and the lowest Java state wins. Use it
-  only for log names and map colours.
-- **Decode runs on the main thread:** about 21 µs per chunk measured in a loop, and 32 µs in the
-  live session. That's about 6 ms per second during a radius-32 join (at most 180 chunks a
-  second), and about 1.4 ms per second flying at radius 32.
-- **Streaming numbers** (release, flying at 11 m/s):
-  - **measured:** 12, 23 and 44 chunks a second at radius 8, 16 and 32;
-  - **walking**, extrapolated: 6, 10 and 19.
-  - **The shape:** chunks come in bursts, about a row within a second of each chunk crossing.
-  - **The model:** the rate is about d·v/16 (8–15% high). The 9-per-tick cap was never reached.
-- **Spawn and chunks race:** `PlayStatus::PlayerSpawn` can arrive before any `LevelChunk`. The
-  client waits for chunks to stop arriving before its checks.
-- **No light data** comes with chunks (M0). Plan M4's first pixels as unlit or full-bright;
-  lighting is M5.
+Found in M4:
+- **Lighting:** chunks still carry no light data, and M4 draws only constant face shading. The
+  sky, fog and clouds aren't drawn either.
+  - **Fog will hide the view's edge.** Over water, rays that enter near the edge of the meshed
+    area leave it before they reach the seabed, so a darker band of sky shows through the water
+    (m4-plan Results, Step 10).
+- **Plant offsets:** Java and Bedrock nudge flowers, grass and other plants off-centre per block.
+  M4 draws every cross centred; only the bamboo stalk is nudged. Moving crosses, and bamboo's
+  leaves, needs vertex positions that can leave their block: a bias in the vertex format.
+- **Tints:** one water colour everywhere (`#44AFF5` at 65%), no per-biome overrides and no blending
+  between biomes. The official client's deep ocean is darker (m4-plan Decision 8).
+- **Special shapes:** a to-do list, sorted by how often they occur, is under "Special shapes to
+  do".
+- **Going back to a pose:** the window can log one (P), but can't go to one. A `--pose` flag, or a
+  teleport once the host has commands, would make comparisons easier.
 
-Notes for M3 (found in M2) were all handled; see `docs/milestones/m3-plan.md`.
-
-## Notes for M5 (found in M2, and when M4 was planned)
+Found earlier:
 
 - **Gamemode and collision** (owner, when approving M4's plan): the host's gamemode is a setting
   (`--gamemode`), creative by default in M4.
@@ -376,8 +415,73 @@ Notes for M3 (found in M2) were all handled; see `docs/milestones/m3-plan.md`.
     during those runs. That's the same for M6, so it's fair, but a bigger template would take
     worldgen out of the numbers.
 
+## Special shapes to do (found in M4)
+
+M4 draws cubes; slabs, snow layers, carpets and lily pads; crossed planes for plants; thin planes
+for vines and lichen; liquids; and bamboo. Every other block whose Java shape isn't a full cube is
+a stand-in cube. The owner asked for this list, sorted by frequency, as the to-do list for a
+special-shapes pass.
+
+**The census:** the stand-in blocks in the acceptance world (m4-plan Results). It covers 3,725
+chunks at radius 32 around the comparison pose, at a jungle edge by the ocean, with lush caves,
+mineshafts and trial chambers below: 109,881 blocks of 43 names. The window logs the same census
+once a join's meshing settles, so a new world refreshes it.
+
+| Block | Count | Shape to draw |
+| --- | --- | --- |
+| `leaf_litter` | 86,229 | Flat segments on the floor, like pink petals |
+| `oak_fence` | 7,235 | A post, with arms toward its neighbours |
+| `pointed_dripstone` | 6,991 | A tapering spike, by thickness |
+| `rail` | 2,994 | A flat plane, or a slope |
+| `iron_chain` | 1,249 | Two thin crossed planes, along its axis |
+| `big_dripleaf` | 1,140 | A leaf platform on a stem |
+| `waxed_oxidized_cut_copper_stairs` | 1,019 | Stairs |
+| `azalea` | 835 | A bush: a box top over crossed planes |
+| `flowering_azalea` | 455 | As `azalea` |
+| `cocoa` | 257 | A small box by age, on a log |
+| `ladder` | 213 | A plane against one face |
+| `chest` | 177 | A smaller box (a block entity) |
+| `waxed_oxidized_copper_trapdoor` | 132 | A thin box, open or shut |
+| `torch` | 124 | A thin stick, or leaning on a wall |
+| `small_dripleaf_block` | 121 | Crossed leaves on stems |
+| `decorated_pot` | 108 | A pot (a block entity) |
+| `spore_blossom` | 73 | Hanging flower planes |
+| `grass_path` | 57 | A cube 15/16 tall |
+| `flower_pot` | 56 | A small pot |
+| `wooden_button` | 55 | A small box on a face |
+| `white_wool_stairs` | 54 | Stairs |
+| `candle` | 52 | One to four small candles |
+| `red_candle` | 34 | As `candle` |
+| `waxed_cut_copper_stairs` | 34 | Stairs |
+| `waxed_oxidized_copper_door` | 34 | A thin box, open or shut |
+| `hopper` | 26 | A funnel |
+| `bed` | 24 | A low box (a block entity) |
+| `farmland` | 20 | A cube 15/16 tall |
+| `acacia_stairs` | 16 | Stairs |
+| `stone_brick_stairs` | 15 | Stairs |
+| `trip_wire` | 10 | A thin line |
+| `acacia_fence` | 9 | As `oak_fence` |
+| `sandstone_stairs` | 7 | Stairs |
+| `straw_bed` | 6 | Not yet known |
+| `stone_button` | 4 | As `wooden_button` |
+| `tripwire_hook` | 4 | A hook on a face |
+| `wooden_pressure_plate` | 4 | A thin slab |
+| `glass_pane` | 2 | A thin pane, with arms toward its neighbours |
+| `waxed_copper_door` | 2 | As the copper door |
+| `acacia_pressure_plate` | 1 | A thin slab |
+| `campfire` | 1 | Crossed logs |
+| `oxidized_copper_chest` | 1 | As `chest` |
+| `stonecutter_block` | 1 | A box 9/16 tall |
+
+- **By family:** stairs are 6 names (1,145 blocks), fences 2, and doors and trapdoors 3. The block
+  entities (chests, pots and beds) want their own models, which M4 leaves out.
+- **Done in M4:** bamboo (m4-plan Deviation 14).
+
 ## Upstream PR candidates
 
+- **`Weather::downfall()`** (fork `443b954`, M4): a one-line accessor in
+  `pumpkin-util/src/biome.rs`, in place of an `#[expect(dead_code)]` on the field. The client
+  tints grass and foliage from each biome's temperature and downfall.
 - **A base-dir parameter for Pumpkin**, so the embedding client needn't change the process's
   working directory (`main.rs`'s `enter_data_dir`). Pumpkin resolves the world, `ops.json`,
   bans, whitelist and user cache from the working directory.

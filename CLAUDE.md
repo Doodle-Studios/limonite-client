@@ -8,14 +8,14 @@ starting any task, and treat it as the source of truth for architecture decision
 
 - **Progress and dev setup:** `docs/STATUS.md`. Read it first, and update it whenever a milestone
   step lands.
-- **Milestones 0 to 3 are done** (M3 on 2026-10-22). **Milestone 4, first pixels, is planned and
-  approved** (2026-10-22): `docs/milestones/m4-plan.md`. Execute it from Step 1. It needs no new
-  plan-mode round unless the real code contradicts it.
+- **Milestones 0 to 4 are done** (M4 on 2026-10-24). **Milestone 5, playable singleplayer, isn't
+  planned yet:** start it in plan mode. STATUS.md's "Notes for M5" and "Special shapes to do",
+  and the Deviations in `docs/milestones/m4-plan.md`, are the starting points.
   - Both repos are public. The superproject is `Doodle-Studios/limonite-client` (`main`), and the
-    fork is `Doodle-Studios/Pumpkin` (`limonite`, at `e251ffb` locally). Check STATUS.md for
+    fork is `Doodle-Studios/Pumpkin` (`limonite`, at `443b954` locally). Check STATUS.md for
     what's pushed. Ask the owner before pushing anything.
 - **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`, and the "Deviations"
-  sections of `docs/milestones/m1-plan.md`, `m2-plan.md` and `m3-plan.md`.
+  sections of `docs/milestones/m1-plan.md` to `m4-plan.md`.
 
 ## Architecture at a glance
 
