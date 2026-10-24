@@ -354,6 +354,11 @@ Each milestone ends in something runnable and is done only when its acceptance c
      - Plan, results and deviations: `docs/milestones/m4-plan.md`.
 5. **Playable singleplayer.** Client prediction, entity interpolation, block break/place, client lighting, basic HUD and inventory in the own UI framework, world list.
    - Accept: a full session of walking, building and saving with no visible input lag; reload restores the world.
+   - **Planned and approved on 2026-10-24:** `docs/milestones/m5-plan.md`.
+
+**5b. Containers.** Crafting (the inventory's 2×2 grid and the crafting table), chests and furnaces, in the own UI framework, through the item stack requests and container packets that M5's inventory uses. Added at M5's approval (owner, 2026-10-24), because survival can't get far without them. It also revisits the default gamemode for new worlds, creative since M5. Numbered 5b so that milestones 6 onward keep their numbers.
+- Accept (proposed; settled when 5b is planned): a survival session from the first tree to a smelted ingot. Craft planks, sticks, a crafting table and a pickaxe, store items in a chest, and smelt ore in a furnace; reload restores every container.
+
 6. **GPU-driven renderer.** Compute meshing, GPU culling, indirect draws, capability tiers, benchmark + warnings.
    - Accept: measurable frame-time improvement over milestone 4 at the same render distance; tier chosen from features, not vendor.
 7. **Open to LAN.** Control API starts and stops the NetherNet listener, status responder and LAN discovery live; the host's packets stay uncompressed; optionally cache one encoding across remote recipients, if measurements justify it.
@@ -385,6 +390,7 @@ The biggest risk is upstream Pumpkin's Bedrock support being incomplete; the big
 | Pumpkin compiles Mojang's vanilla Java datapack into the binary | A distributed Limonite binary would contain Mojang data (worldgen, loot tables, recipes, tags), breaking the "never bundle Mojang assets" rule. `pumpkin-data`'s build script downloads the Java server jar, and generated code `include_str!`s its JSON | Local dev builds only until solved. Decide before any release; one option is to fetch the server jar from Mojang on the user's machine at first run and load the datapack at runtime |
 | The client binary embeds the Bedrock block palette (M4) | 3.9 MB of BDS-mined block names and states, from the fork's `assets/bedrock/block_states.nbt` (CloudburstMC's dump, vendored with Geyser's notice), ship inside the client. It's interoperability data, not assets, but it's Mojang-derived | Dev builds only until decided, together with the datapack row above. `blocks/palette_source.rs` is the one module that knows the source, so a runtime read or a generated table can replace it without touching the renderer |
 | Bedrock auto-updates past Pumpkin's exact protocol | The official client, our control, can't join at all: Pumpkin accepts one exact protocol | Record the client version in each milestone's test; rebase onto upstream protocol bumps; avoid updating the test client mid-milestone |
+| Pumpkin trusts what a Bedrock client reports (found while planning M5) | Pumpkin takes a Bedrock player's position as sent, with no speed or collision check, and places whatever item the client says it holds. That's harmless for the host, who owns the world. But a LAN guest's client (M7) could fly, pass through walls, or place blocks it doesn't have | M7 decides how to treat guests before LAN opens: accept it on a trusted LAN, add checks through a seam, or upstream checks to Pumpkin. Details: `docs/milestones/m5-plan.md`, Findings 1 and 3 |
 | Asset and licence issues | Can't distribute | Load vanilla assets from the user's install; client is GPL-3.0; never bundle packs |
 | Public servers and Realms | Custom clients can trip anti-cheat or break terms | Out of scope; test only on the embedded server and own LAN |
 
