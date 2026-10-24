@@ -8,8 +8,14 @@ _Last updated: 2026-10-24._
 
 ## Where we are
 
-- **Current milestone:** 5, playable singleplayer. **Not planned yet:** start in plan mode (read
-  PLAN.md's M5, "Notes for M5" below, and m4-plan's Deviations first).
+- **Current milestone:** 5, playable singleplayer. **Planned and approved on 2026-10-24:**
+  `docs/milestones/m5-plan.md`. The owner answered all fifteen questions as recommended, and added
+  five amendments. Not started.
+  - **First:** Step 1, the official-client capture (owner present, about 30 minutes, Bedrock
+    1.26.52).
+  - **Checkpoints** after Steps 7, 11, 14 and 16 are go/no-go points: if a phase overruns, the
+    owner can tick what's done and split the rest into its own milestone.
+  - **Next:** milestone 5b, containers, added to PLAN.md at M5's approval; then M6.
 - **Milestone 4 is done (2026-10-24).** Plan, results and deviations: `docs/milestones/m4-plan.md`.
   - **What it built:** a window (winit) with a wgpu device and a fly camera that flies the host;
     CPU meshes for every loaded sub-chunk, drawn with vanilla textures read at runtime from the
@@ -356,6 +362,12 @@ in M2) were too; see `docs/milestones/m3-plan.md`.
 
 ## Notes for M5 (found in M2, M4's planning and M4)
 
+M5's plan takes these up (`docs/milestones/m5-plan.md`): lighting and fog in Decisions 11 and 12,
+special shapes in 7, the pose in 15 (a command line, so `/tp`), gamemode and collision in 5 and 6,
+one server per process in 17, the identity in 16, the permission level in 18, block actions in
+Step 2, and the ECS in 13. Plant offsets and tints stay out of scope, and M5 sends no new resource
+pack status.
+
 Found in M4:
 - **Lighting:** chunks still carry no light data, and M4 draws only constant face shading. The
   sky, fog and clouds aren't drawn either.
@@ -413,6 +425,20 @@ Found earlier:
   - **The flight leaves the template's area** at radius 16 and 32, so the server generates chunks
     during those runs. That's the same for M6, so it's fair, but a bigger template would take
     worldgen out of the numbers.
+
+## Notes for M7 (found while planning M5)
+
+- **Pumpkin trusts what a Bedrock client reports:** its position, unchecked, and the item it says
+  it holds when placing (m5-plan Findings 1 and 3). PLAN.md's Risks has the row; M7 decides how to
+  treat LAN guests.
+- **StartGame tells every player permission level 2,** an operator (`world/mod.rs:2754-2755`, a
+  TODO). M5 makes the host a real operator through `ops.json`, and reads the abilities packet
+  instead, so a guest would be told it's an operator too. An upstream candidate.
+- **Spawn protection is off** in the embedded config from M5 (m5-plan Decision 18), so guests could
+  build at spawn.
+- **Pumpkin ignores item interactions and item stack requests inside `PlayerAuthInput`**
+  (`player_auth_input.rs:223-227`). Whether an official-client guest sends them there is for M7 to
+  check.
 
 ## Special shapes to do (found in M4)
 
