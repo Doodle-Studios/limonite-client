@@ -18,6 +18,7 @@ starting any task, and treat it as the source of truth for architecture decision
   - Both repos are public. The superproject is `Doodle-Studios/limonite-client` (`main`), and the
     fork is `Doodle-Studios/Pumpkin` (`limonite`, at `443b954` locally). Check STATUS.md for
     what's pushed. Ask the owner before pushing anything.
+  - The superproject's GitHub wiki mirrors `docs/`; see Rules for keeping it in step.
 - **Before touching the fork, read** `docs/recon/m0-pumpkin-bedrock.md`, and the "Deviations"
   sections of `docs/milestones/m1-plan.md` to `m4-plan.md`.
 
@@ -67,3 +68,10 @@ All three transports implement the `Transport` trait. The host never touches the
 - Never connect to public servers or Realms while testing. Embedded server and own LAN only.
 - Never attempt to decrypt Marketplace content.
 - Always update the readme regarding any info that needs to be shared.
+- Keep the GitHub wiki in step with `docs/`. The wiki mirrors `docs/PLAN.md`, `docs/STATUS.md`,
+  `docs/recon/` and `docs/milestones/`, one page each. `docs/` stays the source of truth, so never
+  edit wiki pages by hand.
+  - Whenever a change to those files is committed, run `pwsh scripts/sync-wiki.ps1`. It clones the
+    wiki into `run/wiki` (gitignored) if needed, and regenerates every page.
+  - Check `git -C run/wiki diff`, then commit the wiki and push it along with the superproject,
+    after the owner's OK.
