@@ -4,7 +4,7 @@ A living page: where the project is, how to build and run it, and what bites. Up
 milestone step lands. Architecture decisions live in `docs/PLAN.md`; this page is about progress
 and environment.
 
-_Last updated: 2026-10-24._
+_Last updated: 2026-10-25._
 
 ## Where we are
 
@@ -33,16 +33,21 @@ _Last updated: 2026-10-24._
   deliberate non-seam edit: a `Weather::downfall()` accessor in `pumpkin-util/src/biome.rs`, an
   upstream candidate.
 - **Pushed, both public, with the owner's OK** (M1 and M2 on 2026-10-20, M3 on 2026-10-22, M4 on
-  2026-10-24):
+  2026-10-24, the README and the wiki on 2026-10-25):
   - superproject `main` to `https://github.com/Doodle-Studios/limonite-client` (`origin`; `main`
     tracks `origin/main`);
   - the fork's `limonite` branch, at `443b954`, with the M1 to M4 fork commits. It tracks
-    `origin/limonite`. The fork goes first, since `main`'s submodule pointer names its commit.
+    `origin/limonite`. The fork goes first, since `main`'s submodule pointer names its commit;
+  - the wiki, `https://github.com/Doodle-Studios/limonite-client.wiki.git` (`master`), from its
+    clone in `run/wiki`. It goes after `main`, since its pages name `main`'s commit.
 - **No upstream PR is open.** The candidates are listed under "Upstream PR candidates".
 
   Ask the owner before pushing anything, and before opening an upstream PR.
 - **Fork location:** the owner moved the fork to `Doodle-Studios/Pumpkin`. `.gitmodules` and
   `origin` point there. The old `LaDoodleInTheHat/Pumpkin` URL redirects, but don't use it.
+- **README and wiki (2026-10-25):** the README is rewritten for GitHub, with the owner's lemon
+  added to the title, and the docs are mirrored to the GitHub wiki. Keeping both current: Dev
+  environment, "The README and the wiki".
 
 ## Done
 
@@ -295,6 +300,29 @@ the gitignored folder.
 **Join from the official client**
 - Bedrock → Play → Servers → Add Server, address `127.0.0.1`, port `19132`.
 - Loopback works with no exemption needed.
+
+**The README and the wiki**
+- **The README** (`README.md`) is the GitHub landing page, kept current by CLAUDE.md's rule. Its
+  current-phase alert, milestone badge and roadmap table follow this page.
+  - **The title** (`docs/readme/title.png`) is a render of `docs/readme/models/title.bbmodel`, a
+    Blockbench project in the Minecraft Title Generator plugin's format, with the lemon
+    (`lemon.bbmodel`) beside the CLIENT plate. Re-render it with the plugin's Render: resolution
+    2048, antialiasing on.
+  - **The icons** on the feature cards are SVGs in `docs/readme/icons/`, stroked in the plate's
+    lime, `#818600`. No emojis, at the owner's request.
+  - **After pushing a changed image,** github.com can show the old one for about 5 minutes, while
+    GitHub's raw-file cache expires.
+- **The wiki** (`https://github.com/Doodle-Studios/limonite-client/wiki`) mirrors `docs/PLAN.md`,
+  this page, `docs/recon/` and `docs/milestones/`, one page each. It's never edited by hand
+  (CLAUDE.md, Rules).
+  - **After committing doc changes,** run `pwsh scripts/sync-wiki.ps1`. It regenerates every page
+    into `run/wiki`, a gitignored clone of the wiki, cloned if missing. It stops if the docs have
+    uncommitted changes, and never commits or pushes.
+  - **Then** check `git -C run/wiki diff`, and commit and push the wiki after `main`, with the
+    owner's OK.
+- **The owner's original models** from before the lemon (`title.bbmodel`, `lemon.bbmodel`, and
+  their `.obj`, `.mtl` and texture exports) are in `run/readme-models-before-lemon/`, on the
+  owner's machine only.
 
 ## Gotchas
 
