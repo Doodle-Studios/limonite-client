@@ -63,8 +63,10 @@ All three transports implement the `Transport` trait. The host never touches the
 
 - Licence: GPL-3.0.
 - Never bundle Mojang assets or third-party packs. Vanilla assets are only ever read at runtime
-  from the user's install: never copied or cached into the repo, and screenshots stay in
-  gitignored folders.
+  from the user's install: never copied or cached into the repo. Screenshots stay in gitignored
+  folders, except the gameplay screenshots the owner picks for the README, which live in
+  `docs/readme/screenshots/` (the owner's call on 2026-10-25: Mojang's terms allow gameplay
+  screenshots).
 - Never connect to public servers or Realms while testing. Embedded server and own LAN only.
 - Never attempt to decrypt Marketplace content.
 - Always update the readme regarding any info that needs to be shared.
