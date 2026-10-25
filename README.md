@@ -38,8 +38,6 @@
 > at Extra, Max or Ultracode effort, and nearly every commit is co-authored by Claude. The owner
 > steers: each milestone's plan is approved before any code is written, and each milestone is
 > accepted by the owner, checked against the official Bedrock client.
->
-> Please do not spread hate because of it being **AI generated**.
 
 ## What Limonite is
 
