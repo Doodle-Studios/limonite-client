@@ -310,6 +310,10 @@ the gitignored folder.
     2048, antialiasing on.
   - **The icons** on the feature cards are SVGs in `docs/readme/icons/`, stroked in the plate's
     lime, `#818600`. No emojis, at the owner's request.
+  - **The screenshots** in `docs/readme/screenshots/` are the owner's gameplay shots from
+    2026-10-25, cropped below the title bar and saved as 1600 px JPEGs. The before-and-after pair
+    is one pose in Limonite and in the official client, taken with the comparison recipe above.
+    Retake both once M5 draws light.
   - **After pushing a changed image,** github.com can show the old one for about 5 minutes, while
     GitHub's raw-file cache expires.
 - **The wiki** (`https://github.com/Doodle-Studios/limonite-client/wiki`) mirrors `docs/PLAN.md`,

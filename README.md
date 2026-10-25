@@ -20,6 +20,12 @@
 
 [**What it is**](#what-limonite-is) · [**Try it**](#try-it) · [**How it works**](#how-it-works) · [**Roadmap**](#roadmap) · [**Docs**](#documentation)
 
+<br>
+
+<img src="docs/readme/screenshots/hero.jpg" alt="Limonite drawing spruce-covered mountains and stone cliffs with vanilla textures" width="100%">
+
+<sub>Flying over spruce-covered mountains in Limonite: 3,787 chunks loaded, 103 fps in a release build.</sub>
+
 </div>
 
 > [!WARNING]
@@ -147,6 +153,22 @@ Milestones 0 to 4 are done. Here's what they built:
   696, with byte-identical output.
 - **A baseline to beat.** 2,794, 1,016 and 166 fps at radius 8, 16 and 32, in a release build on
   the dev machine. The GPU-driven renderer has to beat it.
+
+The same spot in the same world, at the same pose, in both clients:
+
+<table>
+<tr>
+<th width="50%">Limonite today</th>
+<th width="50%">The official Bedrock client</th>
+</tr>
+<tr>
+<td><img src="docs/readme/screenshots/same-pose-limonite.jpg" alt="A birch forest by a lake, drawn by Limonite: vanilla textures, even light and a plain blue sky"></td>
+<td><img src="docs/readme/screenshots/same-pose-bedrock.jpg" alt="The same birch forest in the official Bedrock client, with lighting, shadows, clouds and reflective water"></td>
+</tr>
+</table>
+
+<sub>Most of the difference is light. Milestone 5 adds smooth lighting, ambient occlusion, the sky's
+colour and fog; clouds, weather and reflective water aren't part of it.</sub>
 
 ## Try it
 
@@ -393,8 +415,9 @@ The rules Claude works by are in [CLAUDE.md](CLAUDE.md).
 
 Limonite is for your own worlds and your own LAN.
 
-- **No Mojang assets or third-party packs in the repo or the binary.** Vanilla assets are only
-  ever read at runtime from your own install.
+- **No Mojang assets or third-party packs bundled.** Vanilla assets are only ever read at runtime
+  from your own install. The only Mojang imagery in the repo is the README's gameplay
+  screenshots.
 - **Not for public servers or Realms.** Custom clients can trip anti-cheat or break terms of
   service, so Limonite is only tested on its embedded server and its owner's LAN.
 - **No Marketplace decryption.** Encrypted packs aren't supported, and never will be.
@@ -438,6 +461,9 @@ Limonite stands on the work of others:
 
 Limonite Client is licensed under the [GNU General Public License v3.0](LICENSE). It embeds a
 modified fork of Pumpkin, which is GPL-3.0 as well.
+
+The screenshots in [`docs/readme/screenshots/`](docs/readme/screenshots) show Minecraft's
+textures, and one shows the official client. They're © Mojang, and not covered by the GPL.
 
 <div align="center">
 <br>
